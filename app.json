@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "ABA Site Diary",
-    "slug": abacm-site-diary",
+    "slug": "abacm-site-diary",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
