@@ -19,10 +19,6 @@
       "bundleIdentifier": "com.aba.sitediary"
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#EA6C1A"
-      },
       "package": "com.aba.sitediary",
       "permissions": [
         "android.permission.CAMERA",
