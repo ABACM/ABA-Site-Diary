@@ -5,12 +5,6 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "icon": "./icon.png",
-    "splash": {
-      "image": "./splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#EA6C1A"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
