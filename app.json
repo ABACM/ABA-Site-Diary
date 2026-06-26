@@ -5,9 +5,9 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "icon": "./icon.png",
+    "icon": "./assets/icon.png",
     "splash": {
-      "image": "./splash.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#EA6C1A"
     },
@@ -19,6 +19,10 @@
       "bundleIdentifier": "com.aba.sitediary"
     },
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#EA6C1A"
+      },
       "package": "com.aba.sitediary",
       "permissions": [
         "android.permission.CAMERA",
