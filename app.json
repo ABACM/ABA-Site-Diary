@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "ABA Site Diary",
+    "slug": "abacm-site-diary",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#EA6C1A"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.aba.sitediary"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#EA6C1A"
+      },
+      "package": "com.aba.sitediary",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET"
+      ],
+      "versionCode": 1
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow ABA Site Diary to attach photos from your library.",
+          "cameraPermission": "Allow ABA Site Diary to take site photos."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "72f60003-d5a2-4537-acf4-a889b8c6979b"
+      }
+    }
+  }
+}
