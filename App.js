@@ -29,6 +29,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { format, parse, isValid } from 'date-fns';
 
@@ -137,10 +138,28 @@ function calcTotals(subs=[]) {
   return { totalPersonnel:p, totalHours:h };
 }
 function pdfFileName(entry) {
-  const no = (entry.projectNo||'NOPROJ').replace(/[^a-zA-Z0-9]/g,'');
-  const nm = (entry.projectName||'Project').replace(/[^a-zA-Z0-9]/g,'').slice(0,20);
+  const no = (entry.projectNo||'NOPROJ').replace(/[^a-zA-Z0-9_-]/g,'').toUpperCase();
+  const nm = (entry.projectName||'Project').replace(/\s+/g,'-').replace(/[^a-zA-Z0-9-]/g,'').slice(0,25);
   const dt = entry.date ? toDisplay(entry.date).replace(/\//g,'') : format(new Date(),'ddMMyyyy');
   return `${no}_${nm}_${dt}.pdf`;
+}
+
+// Generate PDF and save it with the correct filename, returns uri
+async function generateNamedPdf(entry, settings) {
+  const html = buildDiaryHtml(entry, settings);
+  const { uri: tmpUri } = await Print.printToFileAsync({ html, base64: false });
+  const fname = pdfFileName(entry);
+  const destUri = FileSystem.documentDirectory + fname;
+  await FileSystem.copyAsync({ from: tmpUri, to: destUri });
+  return { uri: destUri, fname };
+}
+
+// Read a file as base64
+async function fileToBase64(uri) {
+  try {
+    const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+    return b64;
+  } catch { return ''; }
 }
 
 // ─── WEATHER ──────────────────────────────────────────────────────────────────
@@ -169,40 +188,85 @@ async function fetchWeather() {
 }
 
 // ─── EMAIL via EmailJS (no device email client needed) ───────────────────────
-async function sendEmailViaEmailJS(settings, subject, body, pdfBase64, fileName) {
+// Send notification email (no PDF attachment) — for sign-off request
+async function sendNotificationEmail(settings, toEmails, subject, body) {
+  const { emailjsServiceId, emailjsTemplateId, emailjsPublicKey } = settings || {};
+  if (!emailjsServiceId || !emailjsTemplateId || !emailjsPublicKey) {
+    return { ok:false, reason:'EmailJS not configured. Go to Settings → Auto email to add your EmailJS credentials.' };
+  }
+  if (!toEmails || !toEmails.length) {
+    return { ok:false, reason:'No recipient email addresses set in Settings.' };
+  }
+  try {
+    const payload = {
+      service_id: emailjsServiceId,
+      template_id: emailjsTemplateId,
+      user_id: emailjsPublicKey,
+      template_params: {
+        to_emails: toEmails.join(','),
+        subject,
+        message: body,
+        from_name: settings?.siteSupervisor?.name || 'ABA Site Diary',
+        company: settings?.companyName || 'ABA Construction Managers',
+        has_attachment: 'false',
+        pdf_name: '',
+      },
+    };
+    console.log('[EmailJS] Sending notification to:', toEmails.join(','));
+    const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const txt = await res.text();
+    console.log('[EmailJS] Response:', res.status, txt);
+    if (res.status === 200 || txt === 'OK') return { ok:true };
+    return { ok:false, reason: `EmailJS error ${res.status}: ${txt}` };
+  } catch(e) {
+    console.log('[EmailJS] Exception:', e.message);
+    return { ok:false, reason: e.message };
+  }
+}
+
+// Send sign-off email with PDF as base64 attachment
+async function sendSignoffEmail(settings, toEmails, subject, body, pdfBase64, fileName) {
   const { emailjsServiceId, emailjsTemplateId, emailjsPublicKey } = settings || {};
   if (!emailjsServiceId || !emailjsTemplateId || !emailjsPublicKey) {
     return { ok:false, reason:'EmailJS not configured in Settings.' };
   }
-  const recipients = [
-    settings?.projectManager?.email,
-    settings?.qaRep?.email,
-    settings?.siteSupervisor?.email,
-  ].filter(Boolean);
-  if (!recipients.length) return { ok:false, reason:'No email addresses configured in Settings.' };
+  if (!toEmails || !toEmails.length) {
+    return { ok:false, reason:'No recipient email addresses set in Settings.' };
+  }
   try {
+    const payload = {
+      service_id: emailjsServiceId,
+      template_id: emailjsTemplateId,
+      user_id: emailjsPublicKey,
+      template_params: {
+        to_emails: toEmails.join(','),
+        subject,
+        message: body,
+        from_name: settings?.siteSupervisor?.name || 'ABA Site Diary',
+        company: settings?.companyName || 'ABA Construction Managers',
+        has_attachment: 'true',
+        pdf_name: fileName,
+        pdf_content: pdfBase64 || '',
+      },
+    };
+    console.log('[EmailJS] Sending signoff email, PDF size:', pdfBase64?.length || 0);
     const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        service_id: emailjsServiceId,
-        template_id: emailjsTemplateId,
-        user_id: emailjsPublicKey,
-        template_params: {
-          to_emails: recipients.join(','),
-          subject,
-          message: body,
-          pdf_base64: pdfBase64,
-          pdf_name: fileName,
-          from_name: settings?.siteSupervisor?.name || 'ABA Site Diary',
-          company: settings?.companyName || 'ABA Construction Managers',
-        },
-      }),
+      body: JSON.stringify(payload),
     });
-    if (res.ok || res.status === 200) return { ok:true };
     const txt = await res.text();
-    return { ok:false, reason: txt || `HTTP ${res.status}` };
-  } catch(e) { return { ok:false, reason: e.message }; }
+    console.log('[EmailJS] Response:', res.status, txt);
+    if (res.status === 200 || txt === 'OK') return { ok:true };
+    return { ok:false, reason: `EmailJS error ${res.status}: ${txt}` };
+  } catch(e) {
+    console.log('[EmailJS] Exception:', e.message);
+    return { ok:false, reason: e.message };
+  }
 }
 
 // ─── PDF BUILD ────────────────────────────────────────────────────────────────
@@ -585,6 +649,18 @@ function TodayScreen(){
     ]);
   }
 
+  async function handleSaveDraft(){
+    setSaving(true);
+    try{
+      const tot=calcTotals(entry.subs);
+      const toSave={...entry,...tot,signoffStatus:'draft',savedAt:new Date().toISOString()};
+      await saveEntry(toSave);
+      dispatch({type:'UPDATE_ENTRY',payload:{...tot,signoffStatus:'draft',savedAt:toSave.savedAt}});
+      Alert.alert('📋 Draft saved',`Project: ${toSave.projectName||'(no project)'}\nDate: ${toDisplay(toSave.date)}\n${tot.totalPersonnel} personnel · ${tot.totalHours.toFixed(1)} hrs\n\nYou can continue editing and save again at any time. Tap "Submit & notify" when ready to send for sign-off.`);
+    }catch(e){Alert.alert('Error',e.message);}
+    setSaving(false);
+  }
+
   async function handleSave(){
     if(!entry.projectName){Alert.alert('Project required','Please select or enter a project name.');return;}
     setSaving(true);
@@ -594,18 +670,26 @@ function TodayScreen(){
       await saveEntry(toSave);
       dispatch({type:'UPDATE_ENTRY',payload:{...tot,signoffStatus:'pending'}});
       // Send notification email via EmailJS
-      const{emailjsServiceId,emailjsPublicKey,emailjsTemplateId,pagesUrl}=settings||{};
+      const pagesUrl=settings?.pagesUrl||'';
       const recips=[settings?.projectManager?.email,settings?.qaRep?.email].filter(Boolean);
-      if(recips.length&&emailjsServiceId){
-        const encodeEntry=e=>{try{return btoa(encodeURIComponent(JSON.stringify(e)));}catch{return '';}};
-        const b64=encodeEntry(toSave);
-        const base=pagesUrl||'https://YOUR-GITHUB-USERNAME.github.io/aba-site-diary';
-        const pmLink=`${base}/?id=${entry.id}&role=pm&name=${encodeURIComponent(settings?.projectManager?.name||'PM')}&data=${b64}`;
-        const qaLink=`${base}/?id=${entry.id}&role=qa&name=${encodeURIComponent(settings?.qaRep?.name||'QA')}&data=${b64}`;
-        const body=`A new site diary entry requires your review and sign-off.\n\nProject: ${entry.projectName||'—'} (${entry.projectNo||'—'})\nDate: ${toDisplay(entry.date)}\nPersonnel: ${tot.totalPersonnel} | Labour hours: ${tot.totalHours.toFixed(1)} hrs\n\n── REVIEW & SIGN LINKS ──\n\nProject Manager:\n${pmLink}\n\nQA Representative:\n${qaLink}\n\nTap your link to review the full diary and confirm your signature in your browser.\n\nRegards,\n${settings?.siteSupervisor?.name||'Site Supervisor'}\nABA Construction Managers`;
-        await sendEmailViaEmailJS(settings,`[Action required] Site Diary – ${entry.projectName} – ${toDisplay(entry.date)}`,body,'','');
+      let emailStatus='';
+      if(recips.length){
+        try{
+          const encodeEntry=e=>{try{return btoa(unescape(encodeURIComponent(JSON.stringify(e))));}catch{return '';}};
+          const b64=encodeEntry(toSave);
+          const base=pagesUrl||'https://YOUR-GITHUB-USERNAME.github.io/aba-site-diary';
+          const pmLink=`${base}/?id=${toSave.id}&role=pm&name=${encodeURIComponent(settings?.projectManager?.name||'PM')}&data=${b64}`;
+          const qaLink=`${base}/?id=${toSave.id}&role=qa&name=${encodeURIComponent(settings?.qaRep?.name||'QA')}&data=${b64}`;
+          const subject=`[Sign-off required] Site Diary – ${toSave.projectName||'Project'} – ${toDisplay(toSave.date)}`;
+          const body=`A site diary entry requires your review and sign-off.\n\nProject: ${toSave.projectName||'—'} (${toSave.projectNo||'—'})\nDate: ${toDisplay(toSave.date)}\nPersonnel on site: ${tot.totalPersonnel}\nLabour hours: ${tot.totalHours.toFixed(1)} hrs\nWeather AM: ${toSave.weatherAM||'—'} | PM: ${toSave.weatherPM||'—'}\n\n━━━ REVIEW & SIGN ━━━\n\nProject Manager sign-off:\n${pmLink}\n\nQA Representative sign-off:\n${qaLink}\n\nTap your link to open a mobile-friendly page showing the full diary entry. Review it and tap Confirm Signature.\n\nRegards,\n${settings?.siteSupervisor?.name||'Site Supervisor'}\nABA Construction Managers\n${settings?.companyPhone||''}`;
+          const result=await sendNotificationEmail(settings,recips,subject,body);
+          if(result.ok){emailStatus='✅ Sign-off notification emailed to PM & QA.';}
+          else{emailStatus=`⚠️ Email failed: ${result.reason}`;}
+        }catch(e){emailStatus=`⚠️ Email error: ${e.message}`;}
+      } else {
+        emailStatus='⚠️ No PM/QA email addresses set — go to Settings to configure.';
       }
-      Alert.alert('✅ Entry saved',`Project: ${entry.projectName}\nDate: ${toDisplay(entry.date)}\n${tot.totalPersonnel} personnel · ${tot.totalHours.toFixed(1)} hrs\n\n${recips.length?'Sign-off notification sent to PM & QA.':'Configure PM & QA emails in Settings.'}\n\nGo to Sign off tab to add your signature.`);
+      Alert.alert('Entry saved',`Project: ${toSave.projectName||'—'}\nDate: ${toDisplay(toSave.date)}\n${tot.totalPersonnel} personnel · ${tot.totalHours.toFixed(1)} hrs\n\n${emailStatus}\n\nGo to Sign off tab to add your supervisor signature.`);
     }catch(e){Alert.alert('Error saving',e.message);}
     setSaving(false);
   }
@@ -753,9 +837,14 @@ function TodayScreen(){
       <ProjectPickerModal visible={showProj} onSelect={proj=>upd({projectName:proj.name,projectNo:proj.no})} onClose={()=>setShowProj(false)}/>
 
       <View style={[s.saveBar,{paddingBottom:ins.bottom+8}]}>
-        <TouchableOpacity style={s.saveBtn} onPress={handleSave} disabled={saving}>
-          {saving?<ActivityIndicator color="#fff"/>:<Text style={s.saveBtnT}>💾  Save & notify PM / QA</Text>}
-        </TouchableOpacity>
+        <View style={{flexDirection:'row',gap:SP.sm}}>
+          <TouchableOpacity style={[s.draftBtn]} onPress={handleSaveDraft} disabled={saving}>
+            <Text style={s.draftBtnT}>📋 Save draft</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.saveBtn,{flex:1}]} onPress={handleSave} disabled={saving}>
+            {saving?<ActivityIndicator color="#fff"/>:<Text style={s.saveBtnT}>💾 Submit & notify</Text>}
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -817,22 +906,25 @@ function SignoffScreen(){
       const updated={...entry,signoffStatus:'complete',signoffCompletedAt:new Date().toISOString()};
       await saveEntry(updated);
       dispatch({type:'UPDATE_ENTRY',payload:{signoffStatus:'complete',signoffCompletedAt:updated.signoffCompletedAt}});
-      // Generate PDF
-      const html=buildDiaryHtml(updated,settings);
-      const{uri}=await Print.printToFileAsync({html,base64:true});
-      const fname=pdfFileName(updated);
-      // Send via EmailJS
+      // Generate named PDF
+      const{uri:pdfUri,fname}=await generateNamedPdf(updated,settings);
       const recipients=[settings?.projectManager?.email,settings?.qaRep?.email,settings?.siteSupervisor?.email].filter(Boolean);
       const dateStr=toDisplay(updated.date);
-      const body=`All parties have signed off on the site diary.\n\nProject: ${updated.projectName||'—'} (${updated.projectNo||'—'})\nDate: ${dateStr}\nPersonnel: ${updated.totalPersonnel} | Labour hours: ${updated.totalHours?.toFixed(1)||0} hrs\n\nSigned by:\n• Site Supervisor: ${signedBy.supervisor?.name||'—'}\n• Project Manager: ${signedBy.pm?.name||'—'}\n• QA Representative: ${signedBy.qa?.name||'—'}\n\nPlease find the completed diary PDF attached.\n\nRegards,\n${settings?.siteSupervisor?.name||'Site Supervisor'}\nABA Construction Managers`;
-      // Read base64 from file
-      const b64=await fetch(uri).then(r=>r.blob()).then(b=>new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result.split(',')[1]);fr.onerror=rej;fr.readAsDataURL(b);})).catch(()=>'');
-      const result=await sendEmailViaEmailJS(settings,`Site Diary Signed Off – ${updated.projectName} – ${dateStr} [${fname}]`,body,b64,fname);
+      const emailBody=`All parties have signed off on the site diary.\n\nProject: ${updated.projectName||'—'} (${updated.projectNo||'—'})\nDate: ${dateStr}\nPersonnel: ${updated.totalPersonnel} | Labour hours: ${(updated.totalHours||0).toFixed(1)} hrs\n\nSigned by:\n• Site Supervisor: ${signedBy.supervisor?.name||'—'}\n• Project Manager: ${signedBy.pm?.name||'—'}\n• QA Representative: ${signedBy.qa?.name||'—'}\n\nThe completed diary PDF is attached.\nFile: ${fname}\n\nRegards,\n${settings?.siteSupervisor?.name||'Site Supervisor'}\nABA Construction Managers`;
+      const subject=`Site Diary Signed Off – ${updated.projectName||'Project'} – ${dateStr}`;
+      // Read PDF as base64
+      const pdfB64=await fileToBase64(pdfUri);
+      const result=await sendSignoffEmail(settings,recipients,subject,emailBody,pdfB64,fname);
       if(result.ok){
-        Alert.alert('✅ Complete','PDF generated and emailed to all parties.',[ {text:'Also share PDF',onPress:async()=>{await Sharing.shareAsync(uri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});}},{text:'Done',style:'cancel'}]);
+        Alert.alert('✅ Complete!',`PDF sent to all parties.\nFile: ${fname}`,[
+          {text:'Also share PDF',onPress:async()=>{await Sharing.shareAsync(pdfUri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});}},
+          {text:'Done',style:'cancel'},
+        ]);
       } else {
-        // Fallback: share PDF manually
-        Alert.alert('✅ Signed off','PDF generated. '+( result.reason||'Configure EmailJS in Settings for auto-send.')+'\n\nSharing PDF now so you can send manually.',[{text:'Share PDF',onPress:async()=>{await Sharing.shareAsync(uri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});}}]);
+        Alert.alert('✅ Signed off',`${result.reason||'Email not configured'}\n\nFile: ${fname}\n\nSharing PDF so you can send manually.`,[
+          {text:'Share PDF',onPress:async()=>{await Sharing.shareAsync(pdfUri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});}},
+          {text:'Done',style:'cancel'},
+        ]);
       }
     }catch(e){Alert.alert('Error',e.message);}
     setLoading(false);
@@ -900,8 +992,8 @@ function HistoryScreen({navigation}){
   useEffect(()=>{load();},[]);
   const grouped=entries.reduce((acc,e)=>{const k=(e.date||'unknown').slice(0,7);if(!acc[k])acc[k]=[];acc[k].push(e);return acc;},{});
   const months=Object.keys(grouped).sort().reverse();
-  function stColor(st){return st==='complete'?C.accent:st==='pending'?C.pending:C.textHint;}
-  function stLabel(st){return st==='complete'?'✅ Signed':st==='pending'?'⏳ Pending':'📝 Draft';}
+  function stColor(st){return st==='complete'?C.accent:st==='pending'?C.pending:C.primary;}
+  function stLabel(st){return st==='complete'?'✅ Signed off':st==='pending'?'⏳ Awaiting sign-off':'📝 Draft';}
   async function handleReport(mk){
     setRepLoading(true);
     try{
@@ -914,10 +1006,9 @@ function HistoryScreen({navigation}){
   }
   async function sharePdf(entry){
     try{
-      const html=buildDiaryHtml(entry,settings);
-      const{uri}=await Print.printToFileAsync({html,base64:false});
-      await Sharing.shareAsync(uri,{mimeType:'application/pdf',dialogTitle:pdfFileName(entry)});
-    }catch(e){Alert.alert('Error',e.message);}
+      const{uri,fname}=await generateNamedPdf(entry,settings);
+      await Sharing.shareAsync(uri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});
+    }catch(e){Alert.alert('Error generating PDF',e.message);}
   }
   if(loading)return<View style={{flex:1,backgroundColor:C.background}}><AppHeader title="History"/><View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.accent} size="large"/></View></View>;
   return(
@@ -1050,6 +1141,8 @@ const s=StyleSheet.create({
   saveBar:{backgroundColor:C.white,padding:SP.md,borderTopWidth:0.5,borderTopColor:C.border},
   saveBtn:{backgroundColor:C.primary,borderRadius:R.md,padding:SP.md,alignItems:'center'},
   saveBtnT:{color:'#fff',fontSize:15,fontWeight:'600'},
+  draftBtn:{backgroundColor:C.white,borderRadius:R.md,padding:SP.md,alignItems:'center',borderWidth:1.5,borderColor:C.primary,minWidth:120},
+  draftBtnT:{color:C.primary,fontSize:14,fontWeight:'600'},
   pill:{flexDirection:'row',alignItems:'center',gap:6,backgroundColor:C.accentLight,borderRadius:R.full,paddingHorizontal:10,paddingVertical:4,marginRight:8,borderWidth:0.5,borderColor:C.accent},
   pillL:{fontSize:10,fontWeight:'700',color:C.accentDark},
   pillN:{fontSize:12,color:C.accentDark},
