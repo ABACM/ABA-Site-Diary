@@ -50,17 +50,20 @@ const C = {
 const SP = { xs:4, sm:8, md:12, lg:16, xl:24 };
 const R  = { sm:6, md:10, lg:14, full:999 };
 const SH = { shadowColor:'#000', shadowOffset:{width:0,height:1}, shadowOpacity:0.08, shadowRadius:4, elevation:3 };
-
-// ─── STORAGE ──────────────────────────────────────────────────────────────────
-async function getEntries() {
-  try { const r = await AsyncStorage.getItem('aba_entries_v2'); return r ? JSON.parse(r) : []; }
-  catch { return []; }
 }
 async function saveEntry(entry) {
   try {
     const entries = await getEntries();
     const idx = entries.findIndex(e => e.id === entry.id);
     if (idx >= 0) entries[idx] = entry; else entries.unshift(entry);
+async function getEntries() {
+  try { const r = await AsyncStorage.getItem('aba_entries_v2'); return r ? JSON.parse(r) : []; }
+  catch { return []; }
+
+    return r ? JSON.parse(r) : {
+      companyName: 'ABA Construction Managers (Aust) Pty Ltd',
+      companyAddress: 'Suite 7 Level One, 55 Heffernan St, Mitchell ACT 2911',
+      companyPhone: '(02) 6242 3400',
     await AsyncStorage.setItem('aba_entries_v2', JSON.stringify(entries));
     return true;
   } catch { return false; }
@@ -68,221 +71,6 @@ async function saveEntry(entry) {
 async function getSettings() {
   try {
     const r = await AsyncStorage.getItem('aba_settings_v2');
-    return r ? JSON.parse(r) : {
-      companyName: 'ABA Construction Managers (Aust) Pty Ltd',
-      companyAddress: 'Suite 7 Level One, 55 Heffernan St, Mitchell ACT 2911',
-      companyPhone: '(02) 6242 3400',
-      projectManager:  { name:'', email:'' },
-      qaRep:           { name:'', email:'' },
-      siteSupervisor:  { name:'', email:'' },
-      savedSubcontractors: ['Clarke Civil','Mitchell Electrical','ACT Plumbing','Apex Formwork','Total Concreting'],
-      standardHoursPerDay: '8',
-      projectStartDate: '',
-      pagesUrl: 'https://YOUR-GITHUB-USERNAME.github.io/aba-site-diary',
-    };
-  } catch { return {}; }
-}
-async function persistSettings(s) {
-  try { await AsyncStorage.setItem('aba_settings_v2', JSON.stringify(s)); } catch {}
-}
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-function calcSubHours(sub) {
-  try {
-    const t = s => { const [h,m]=(s||'07:00').split(':').map(Number); return h*60+m; };
-    return Math.max(0,(t(sub.timeEnd||'15:30')-t(sub.timeStart||'07:00'))/60);
-  } catch { return 0; }
-}
-function calcTotals(subs=[]) {
-  let p=0,h=0;
-  (subs||[]).forEach(s=>{ const n=parseInt(s.personnel)||0; p+=n; h+=n*calcSubHours(s); });
-  return { totalPersonnel:p, totalHours:h };
-}
-function fmtDate(d) { try { return format(new Date(d+'T12:00:00'),'EEEE, d MMMM yyyy'); } catch { return d||'—'; } }
-function fmtDateShort(d) { try { return format(new Date(d+'T12:00:00'),'EEE d MMM'); } catch { return d||'—'; } }
-function fmtMonth(k) { try { return format(new Date(k+'-01T12:00:00'),'MMMM yyyy'); } catch { return k; } }
-function prevMonthKey(k) { const[y,m]=k.split('-').map(Number); return m===1?`${y-1}-12`:`${y}-${String(m-1).padStart(2,'0')}`; }
-
-// ─── WEATHER API ──────────────────────────────────────────────────────────────
-const WMO_MAP = {
-  0:'Clear ☀️', 1:'Mostly Clear ⛅', 2:'Partly Cloudy ⛅', 3:'Overcast ☁️',
-  45:'Foggy 🌫', 48:'Foggy 🌫', 51:'Light Drizzle 🌦', 53:'Drizzle 🌦',
-  55:'Heavy Drizzle 🌦', 61:'Light Rain 🌧', 63:'Rain 🌧', 65:'Heavy Rain 🌧',
-  71:'Light Snow 🌨', 73:'Snow 🌨', 75:'Heavy Snow 🌨',
-  80:'Rain Showers 🌦', 81:'Showers 🌦', 82:'Heavy Showers 🌦',
-  95:'Thunderstorm ⛈', 96:'Thunderstorm ⛈', 99:'Thunderstorm ⛈',
-};
-async function fetchWeather() {
-  try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') return null;
-    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-    const { latitude, longitude } = loc.coords;
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude.toFixed(4)}&longitude=${longitude.toFixed(4)}&hourly=weathercode,temperature_2m&timezone=auto&forecast_days=1`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const now = new Date();
-    const hour = now.getHours();
-    const amCode = data.hourly.weathercode[Math.max(0,hour-2)] ?? data.hourly.weathercode[0];
-    const pmCode = data.hourly.weathercode[Math.min(23,hour+4)] ?? data.hourly.weathercode[12];
-    const amTemp = Math.round(data.hourly.temperature_2m[Math.max(0,hour-2)]);
-    const pmTemp = Math.round(data.hourly.temperature_2m[Math.min(23,hour+4)]);
-    return {
-      am: `${WMO_MAP[amCode]||'—'} ${amTemp}°C`,
-      pm: `${WMO_MAP[pmCode]||'—'} ${pmTemp}°C`,
-    };
-  } catch { return null; }
-}
-
-// ─── PDF GENERATION ───────────────────────────────────────────────────────────
-function buildDiaryHtml(entry, settings={}) {
-  const { totalPersonnel, totalHours } = calcTotals(entry.subs);
-  const CL = ['1. Inspections and Tests','2. Visitors and Purposes','3. Discussions and Meetings',
-    '4. Shortage of Information','5. Delays, Defects – Client supplies',
-    '6. Planning information required','7. Equipment on hire','8. Messages'];
-  const SLBLS = {work:'Work in progress',delays:'Delays incurred',oral:'Oral instructions',drawings:'Drawings & memos received'};
-  const secRows = Object.entries(SLBLS).map(([k,l])=>{
-    const lines=(entry.sections?.[k]||[]).filter(Boolean);
-    const photos=(entry.sectionPhotos?.[k]||[]);
-    if(!lines.length&&!photos.length) return '';
-    return `<tr><td class="ic">${l}</td><td>${lines.map(x=>`<div class="el">${x}</div>`).join('')}${photos.map(p=>`<img src="${p}" style="max-width:120px;max-height:90px;border-radius:4px;margin:3px">`).join('')}</td></tr>`;
-  }).join('');
-  const subRows=(entry.subs||[]).map(s=>{
-    const p=parseInt(s.personnel)||0,h=calcSubHours(s);
-    return `<tr><td>${s.name||'—'}</td><td style="text-align:center">${p}</td><td style="text-align:center">${s.timeStart||'—'}–${s.timeEnd||'—'}</td><td style="text-align:right;font-weight:600;color:#4CAF50">${(p*h).toFixed(1)} hrs</td></tr>${s.notes?`<tr><td colspan="4" style="font-size:11px;color:#6B7280;padding:2px 8px 6px">${s.notes}</td></tr>`:''}`;
-  }).join('');
-  const clRows=CL.map((l,i)=>{const cl=entry.checklist?.[i]||{};return `<tr><td style="width:20px">${cl.checked?'☑':'☐'}</td><td>${l}</td><td style="color:#6B7280;font-size:11px">${cl.note||''}</td></tr>`;}).join('');
-  const sig=(label,name)=>`<div style="flex:1;min-width:130px"><div style="font-size:10px;color:#6B7280;text-transform:uppercase;margin-bottom:2px">${label}</div><div style="font-size:12px;font-weight:600;margin-bottom:4px">${name||''}</div><div style="width:100%;height:48px;border-bottom:2px solid #0D1B3E"></div></div>`;
-  const badge=entry.signoffStatus==='complete'?`<span style="background:#4CAF50;color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">✅ Signed off</span>`:`<span style="background:#6B7280;color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">Pending</span>`;
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:12px;color:#0D1B3E;padding:20px}
-.hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #4CAF50;padding-bottom:10px;margin-bottom:14px}
-.co{font-size:15px;font-weight:bold;color:#0D1B3E}.cos{font-size:9px;color:#6B7280;margin-top:1px}
-.ttl{font-size:20px;font-weight:bold;text-align:right;color:#0D1B3E}
-.meta{display:flex;gap:12px;margin-bottom:12px;padding:10px;background:#F0F4F0;border-radius:8px;flex-wrap:wrap}
-.mi label{display:block;font-size:9px;text-transform:uppercase;color:#9CA3AF;margin-bottom:1px}
-h3{font-size:11px;font-weight:bold;text-transform:uppercase;color:#0D1B3E;margin:14px 0 6px;border-bottom:2px solid #4CAF50;padding-bottom:3px}
-table{width:100%;border-collapse:collapse;margin-bottom:10px}
-th{background:#0D1B3E;color:#fff;padding:6px 10px;text-align:left;font-size:10px}
-td{padding:6px 10px;border-bottom:.5px solid #D0D9D0;font-size:11px;vertical-align:top}
-.ic{width:35%;background:#F8FAF8;font-size:11px;color:#4A5568}.el{padding:2px 0;border-bottom:.5px solid #E8F5E9}.el:last-child{border:none}
-.totbox{display:flex;gap:12px;margin-bottom:10px}
-.tb{flex:1;background:#E8F5E9;border-radius:8px;padding:10px;text-align:center}
-.tb .n{font-size:22px;font-weight:bold;color:#4CAF50}.tb .l{font-size:10px;color:#2E7D32}
-.sigs{display:flex;gap:14px;margin-top:20px}
-.ftr{margin-top:16px;border-top:1px solid #D0D9D0;padding-top:6px;font-size:9px;color:#9CA3AF;display:flex;justify-content:space-between}
-</style></head><body>
-<div class="hdr"><div><div class="co">${settings.companyName||'ABA Construction Managers (Aust) Pty Ltd'}</div><div class="cos">${settings.companyAddress||''}</div><div class="cos">Tel: ${settings.companyPhone||''} | ACN: 155 990 597 | ABN: 29 155 990 597</div></div><div style="text-align:right"><div class="ttl">Site Diary</div><div style="margin-top:4px">${badge}</div></div></div>
-<div class="meta"><div class="mi"><label>Date</label><strong>${fmtDate(entry.date)}</strong></div><div class="mi"><label>Project</label><strong>${entry.projectName||'—'}</strong></div><div class="mi"><label>No.</label><strong>${entry.projectNo||'—'}</strong></div><div class="mi"><label>Weather AM</label><strong>${entry.weatherAM||'—'}</strong></div><div class="mi"><label>Weather PM</label><strong>${entry.weatherPM||'—'}</strong></div></div>
-${secRows?`<h3>Daily entries</h3><table><tbody>${secRows}</tbody></table>`:''}
-${(entry.subs||[]).length?`<h3>Subcontractors on site</h3><div class="totbox"><div class="tb"><div class="n">${totalPersonnel}</div><div class="l">Total personnel</div></div><div class="tb"><div class="n">${totalHours.toFixed(1)}</div><div class="l">Labour hours</div></div></div><table><thead><tr><th>Subcontractor</th><th>Personnel</th><th>On site</th><th>Labour hrs</th></tr></thead><tbody>${subRows}</tbody></table>`:''}
-<h3>Other checklist</h3><table><tbody>${clRows}</tbody></table>
-${entry.addlNotes?`<h3>Additional notes</h3><div style="padding:8px;background:#F0F4F0;border-radius:6px">${entry.addlNotes}</div>`:''}
-<h3>Authorisations</h3><div class="sigs">${sig('Site Supervisor',settings.siteSupervisor?.name)}${sig('Project Manager',settings.projectManager?.name)}${sig('QA Representative',settings.qaRep?.name)}</div>
-<div class="ftr"><span>ABA Site Diary | Ref: aba-220 Rev.2</span><span>Generated ${format(new Date(),'d MMM yyyy, HH:mm')}</span></div>
-</body></html>`;
-}
-
-function buildStatsHtml(monthKey, monthEntries, prevEntries, allEntries, settings={}) {
-  function stats(entries) {
-    const totalHours=entries.reduce((s,e)=>s+(e.totalHours||0),0);
-    const fte=entries.length>0?totalHours/(parseFloat(settings?.standardHoursPerDay||8)*entries.length):0;
-    let pm=null;
-    if(settings?.projectStartDate){try{const st=new Date(settings.projectStartDate+'T12:00:00');const tm=new Date(monthKey+'-01T12:00:00');pm=(tm.getFullYear()-st.getFullYear())*12+(tm.getMonth()-st.getMonth())+1;}catch{}}
-    return {
-      pm, totalHours:Math.round(totalHours*10)/10, fte:Math.round(fte*100)/100,
-      ltifr:0, severityRate:0,
-      siteInspections:entries.filter(e=>e.checklist?.[0]?.checked).length,
-      certAudits:entries.filter(e=>e.checklist?.[1]?.checked).length,
-      subInductions:new Set(entries.flatMap(e=>(e.subs||[]).map(s=>s.name).filter(Boolean))).size,
-      toolboxTalks:entries.filter(e=>e.checklist?.[2]?.checked).length,
-      whsTraining:entries.filter(e=>e.checklist?.[5]?.checked).length,
-      totalPersonnel:entries.reduce((s,e)=>s+(e.totalPersonnel||0),0),
-    };
-  }
-  const c=stats(monthEntries), p=stats(prevEntries), l=stats(allEntries);
-  const ml=fmtMonth(monthKey), pl=fmtMonth(prevMonthKey(monthKey));
-  const fv=(v,cur=false)=>v===null?'—':cur?`$${Number(v).toLocaleString('en-AU',{minimumFractionDigits:2})}`:String(v);
-  const ROWS=[
-    {l:'A',label:'Length of Project (Months)',c:fv(c.pm),p:fv(p.pm),lt:fv(l.pm),auto:true},
-    {l:'B',label:'Total tradespeople Reported Hours',c:fv(c.totalHours),p:fv(p.totalHours),lt:fv(l.totalHours),auto:true},
-    {l:'C',label:'FTE (Full Time Equivalent)',c:fv(c.fte),p:fv(p.fte),lt:fv(l.fte),auto:true},
-    {l:'D',label:'LTI (Number of Lost Time Injuries)',c:'0',p:'0',lt:'0',auto:false},
-    {l:'E',label:'HL (Number Hours Lost)',c:'0',p:'0',lt:'0',auto:false},
-    {l:'F',label:'Cost Due to Injury',c:fv(0,true),p:fv(0,true),lt:fv(0,true),auto:false},
-    {l:'G',label:"LTIFR (LTI's per 1,000,000 hrs)",c:fv(c.ltifr),p:fv(p.ltifr),lt:fv(l.ltifr),auto:true},
-    {l:'H',label:'Total Recordable Injury Frequency Rate (TRIFR)',c:'0',p:'0',lt:'0',auto:false},
-    {l:'I',label:'Severity Rate (Days lost per LTI)',c:'0',p:'0',lt:'0',auto:true},
-    {l:'J',label:'Incidents reported to WorkSafe ACT',c:'0',p:'0',lt:'0',auto:false},
-    {l:'K',label:'Site Inspections (Builder WHS activity)',c:fv(c.siteInspections),p:fv(p.siteInspections),lt:fv(l.siteInspections),auto:true},
-    {l:'L',label:'Active Certification Audits',c:fv(c.certAudits),p:fv(p.certAudits),lt:fv(l.certAudits),auto:true},
-    {l:'M',label:'Sub-contractor Site Inductions',c:fv(c.subInductions),p:fv(p.subInductions),lt:fv(l.subInductions),auto:true},
-    {l:'N',label:'Number of Toolbox talks',c:fv(c.toolboxTalks),p:fv(p.toolboxTalks),lt:fv(l.toolboxTalks),auto:true},
-    {l:'O',label:'WHS Training/Education',c:fv(c.whsTraining),p:fv(p.whsTraining),lt:fv(l.whsTraining),auto:true},
-  ];
-  const subMap={};
-  monthEntries.forEach(e=>(e.subs||[]).forEach(s=>{if(!s.name)return;if(!subMap[s.name])subMap[s.name]={hours:0,maxP:0,days:0};const pp=parseInt(s.personnel)||0;subMap[s.name].hours+=pp*calcSubHours(s);subMap[s.name].maxP=Math.max(subMap[s.name].maxP,pp);subMap[s.name].days+=1;}));
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11px;color:#0D1B3E;padding:20px}
-.hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #4CAF50;padding-bottom:10px;margin-bottom:14px}
-.co{font-size:14px;font-weight:bold;color:#0D1B3E}.cos{font-size:9px;color:#6B7280;margin-top:1px}
-.ttl{font-size:18px;font-weight:bold;text-align:right}
-.meta{display:flex;gap:12px;margin-bottom:12px;padding:10px;background:#F0F4F0;border-radius:8px;font-size:11px;flex-wrap:wrap}
-.mi strong{display:block;font-size:9px;text-transform:uppercase;color:#9CA3AF;margin-bottom:1px}
-h3{font-size:11px;font-weight:bold;text-transform:uppercase;color:#0D1B3E;margin:14px 0 6px;border-bottom:2px solid #4CAF50;padding-bottom:3px}
-table{width:100%;border-collapse:collapse;margin-bottom:10px}
-th{background:#0D1B3E;color:#fff;padding:6px 10px;text-align:left;font-size:10px}th.r{text-align:right}
-td{padding:6px 10px;border-bottom:.5px solid #D0D9D0;font-size:11px;vertical-align:top}
-.lt{width:20px;color:#4CAF50;font-weight:700}.nr{text-align:right;font-weight:500}
-tr:nth-child(even) td{background:#F8FAF8}
-.ab{font-size:9px;background:#E8F5E9;color:#2E7D32;padding:1px 6px;border-radius:10px;margin-left:4px}
-.mb{font-size:9px;background:#FEF3D8;color:#A06010;padding:1px 6px;border-radius:10px;margin-left:4px}
-.ftr{margin-top:14px;border-top:1px solid #D0D9D0;padding-top:6px;font-size:9px;color:#9CA3AF;display:flex;justify-content:space-between}
-</style></head><body>
-<div class="hdr"><div><div class="co">${settings.companyName||'ABA Construction Managers (Aust) Pty Ltd'}</div><div class="cos">${settings.companyAddress||''}</div><div class="cos">Tel: ${settings.companyPhone||''} | ACN: 155 990 597 | ABN: 29 155 990 597</div></div><div><div class="ttl">Monthly WHS Statistics</div><div style="font-size:11px;color:#6B7280;text-align:right;margin-top:2px">Ref: aba-220 | ${ml}</div></div></div>
-<div class="meta"><div class="mi"><strong>Report period</strong>${ml}</div><div class="mi"><strong>Diary entries</strong>${monthEntries.length} days</div><div class="mi"><strong>Total hours</strong>${c.totalHours} hrs</div><div class="mi"><strong>Total personnel-days</strong>${c.totalPersonnel}</div><div class="mi"><strong>Generated</strong>${format(new Date(),'d MMM yyyy, HH:mm')}</div></div>
-<h3>WHS & Project Statistics — Stats.xlsx (A–O)</h3>
-<table><thead><tr><th style="width:20px"></th><th>Item</th><th class="r" style="width:110px">Current<br><small style="font-weight:400">${ml}</small></th><th class="r" style="width:110px">Previous<br><small style="font-weight:400">${pl}</small></th><th class="r" style="width:90px">Life to date</th></tr></thead><tbody>
-${ROWS.map(r=>`<tr><td class="lt">${r.l}.</td><td>${r.label}<span class="${r.auto?'ab':'mb'}">${r.auto?'auto':'manual'}</span></td><td class="nr">${r.c}</td><td class="nr">${r.p}</td><td class="nr">${r.lt}</td></tr>`).join('')}
-</tbody></table>
-<p style="font-size:9px;color:#9CA3AF;margin-bottom:10px"><strong>Auto</strong> = calculated from diary data. <strong>Manual</strong> = update D, E, F, H, J after incidents occur. LTIFR = LTI × 1,000,000 ÷ Total hours.</p>
-${Object.keys(subMap).length?`<h3>Subcontractor Labour Hours — ${ml}</h3><table><thead><tr><th>Subcontractor</th><th class="r">Days on site</th><th class="r">Max personnel</th><th class="r">Total hours</th></tr></thead><tbody>${Object.entries(subMap).map(([n,d])=>`<tr><td>${n}</td><td class="nr">${d.days}</td><td class="nr">${d.maxP}</td><td class="nr">${d.hours.toFixed(1)} hrs</td></tr>`).join('')}<tr style="font-weight:700;background:#E8F5E9"><td>TOTAL</td><td class="nr">—</td><td class="nr">—</td><td class="nr">${Object.values(subMap).reduce((a,d)=>a+d.hours,0).toFixed(1)} hrs</td></tr></tbody></table>`:''}
-<h3>Daily entries summary — ${ml}</h3>
-<table><thead><tr><th>Date</th><th>Project</th><th>Weather AM/PM</th><th class="r">Personnel</th><th class="r">Labour hrs</th><th>Status</th></tr></thead><tbody>
-${monthEntries.map(e=>`<tr><td>${fmtDateShort(e.date)}</td><td>${e.projectName||'—'}</td><td>${e.weatherAM||'—'} / ${e.weatherPM||'—'}</td><td class="nr">${e.totalPersonnel||0}</td><td class="nr">${(e.totalHours||0).toFixed(1)}</td><td>${e.signoffStatus==='complete'?'✅ Signed':e.signoffStatus==='pending'?'⏳ Pending':'📝 Draft'}</td></tr>`).join('')}
-</tbody></table>
-<div class="ftr"><span>ABA Construction Managers | Monthly WHS Statistics | ${ml}</span><span>Generated ${format(new Date(),'d MMM yyyy, HH:mm')}</span></div>
-</body></html>`;
-}
-
-async function generateAndEmailPdf(entry, settings) {
-  const html = buildDiaryHtml(entry, settings);
-  const { uri } = await Print.printToFileAsync({ html, base64:false });
-  let dateStr = entry.date;
-  try { dateStr = format(new Date(entry.date+'T12:00:00'),'d MMM yyyy'); } catch {}
-  const recipients = [
-    settings?.projectManager?.email,
-    settings?.qaRep?.email,
-    settings?.siteSupervisor?.email,
-  ].filter(Boolean);
-  const ok = await MailComposer.isAvailableAsync();
-  if (!ok) {
-    await Sharing.shareAsync(uri, { mimeType:'application/pdf', dialogTitle:`Site Diary – ${dateStr}` });
-    return;
-  }
-  await MailComposer.composeAsync({
-    recipients,
-    subject: `Site Diary – ${entry.projectName||'Project'} – ${dateStr} [SIGNED OFF]`,
-    body: `All parties have signed off on the site diary for ${entry.projectName||'the project'} dated ${dateStr}.\n\nPlease find the completed diary attached.\n\nKind regards,\n${settings.siteSupervisor?.name||'Site Supervisor'}\nABA Construction Managers`,
-    attachments: [uri],
-  });
-}
-
-async function generateStatsPdf(monthKey, monthEntries, prevEntries, allEntries, settings) {
-  const html = buildStatsHtml(monthKey, monthEntries, prevEntries, allEntries, settings);
-  const { uri } = await Print.printToFileAsync({ html, base64:false });
-  await Sharing.shareAsync(uri, { mimeType:'application/pdf', dialogTitle:`WHS Statistics – ${fmtMonth(monthKey)}` });
-}
 
 // ─── STATE / CONTEXT ──────────────────────────────────────────────────────────
 const DiaryContext = createContext(null);
@@ -326,143 +114,6 @@ function DiaryProvider({ children }) {
   return <DiaryContext.Provider value={{state, dispatch, updateSettings}}>{children}</DiaryContext.Provider>;
 }
 function useDiary() { return useContext(DiaryContext); }
-
-// ─── APP HEADER ───────────────────────────────────────────────────────────────
-function AppHeader({ title, subtitle, rightAction }) {
-  const ins = useSafeAreaInsets();
-  return (
-    <View style={[hs.wrap, {paddingTop:ins.top+8}]}>
-      <View style={hs.logo}><Text style={hs.logoT}>ABA</Text></View>
-      <View style={{flex:1}}>
-        <Text style={hs.title}>{title}</Text>
-        {subtitle?<Text style={hs.sub}>{subtitle}</Text>:null}
-      </View>
-      {rightAction
-        ? <TouchableOpacity onPress={rightAction.onPress} style={hs.rBtn}><Text style={hs.rBtnT}>{rightAction.label}</Text></TouchableOpacity>
-        : <View style={{width:60}}/>}
-    </View>
-  );
-}
-const hs = StyleSheet.create({
-  wrap:{ backgroundColor:C.primary, paddingHorizontal:SP.lg, paddingBottom:SP.md, flexDirection:'row', alignItems:'center', gap:SP.sm },
-  logo:{ width:38, height:38, backgroundColor:'rgba(76,175,80,0.3)', borderRadius:8, alignItems:'center', justifyContent:'center', borderWidth:1, borderColor:C.accent },
-  logoT:{ color:C.accent, fontSize:11, fontWeight:'700' },
-  title:{ color:'#fff', fontSize:16, fontWeight:'600' },
-  sub:{ color:'rgba(255,255,255,0.75)', fontSize:11, marginTop:1 },
-  rBtn:{ backgroundColor:'rgba(76,175,80,0.3)', paddingHorizontal:12, paddingVertical:6, borderRadius:20, borderWidth:1, borderColor:C.accent },
-  rBtnT:{ color:C.accent, fontSize:12, fontWeight:'600' },
-});
-
-// ─── VOICE-TO-TEXT WEBVIEW ────────────────────────────────────────────────────
-const VTT_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:transparent;font-family:sans-serif}button{background:#4CAF50;color:#fff;border:none;border-radius:50%;width:72px;height:72px;font-size:28px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3)}button.listening{background:#DC2626;animation:pulse 1s infinite}@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}</style></head><body>
-<button id="btn" onclick="toggle()">🎤</button>
-<script>
-var recog=null,listening=false;
-function toggle(){
-  if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){window.ReactNativeWebView.postMessage(JSON.stringify({type:'error',msg:'Not supported'}));return;}
-  if(listening){recog&&recog.stop();return;}
-  var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  recog=new SR();recog.lang='en-AU';recog.continuous=false;recog.interimResults=false;
-  recog.onstart=function(){listening=true;document.getElementById('btn').className='listening';document.getElementById('btn').textContent='⏹';};
-  recog.onresult=function(e){var t=e.results[0][0].transcript;window.ReactNativeWebView.postMessage(JSON.stringify({type:'result',text:t}));};
-  recog.onend=function(){listening=false;document.getElementById('btn').className='';document.getElementById('btn').textContent='🎤';};
-  recog.onerror=function(e){listening=false;document.getElementById('btn').className='';document.getElementById('btn').textContent='🎤';window.ReactNativeWebView.postMessage(JSON.stringify({type:'error',msg:e.error}));};
-  recog.start();
-}
-</script></body></html>`;
-
-function VoiceButton({ onResult }) {
-  const [show, setShow] = useState(false);
-  if (!show) return (
-    <TouchableOpacity style={vb.btn} onPress={()=>setShow(true)}>
-      <Text style={{fontSize:16}}>🎤</Text>
-    </TouchableOpacity>
-  );
-  return (
-    <View style={vb.overlay}>
-      <View style={vb.modal}>
-        <Text style={vb.title}>Listening… speak now</Text>
-        <View style={{height:120}}>
-          <WebView
-            originWhitelist={['*']}
-            source={{html:VTT_HTML}}
-            style={{flex:1,backgroundColor:'transparent'}}
-            scrollEnabled={false}
-            onMessage={e=>{
-              try {
-                const d = JSON.parse(e.nativeEvent.data);
-                if(d.type==='result'){onResult(d.text);setShow(false);}
-                else{Alert.alert('Voice error',d.msg||'Try again');setShow(false);}
-              } catch { setShow(false); }
-            }}
-          />
-        </View>
-        <TouchableOpacity style={vb.cancel} onPress={()=>setShow(false)}>
-          <Text style={{color:C.textSecondary,fontSize:13}}>Cancel</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
-const vb = StyleSheet.create({
-  btn:{ width:32, height:32, borderRadius:16, backgroundColor:C.accentLight, borderWidth:0.5, borderColor:C.accent, alignItems:'center', justifyContent:'center', marginLeft:6 },
-  overlay:{ ...StyleSheet.absoluteFillObject, backgroundColor:'rgba(0,0,0,0.5)', zIndex:200, alignItems:'center', justifyContent:'center' },
-  modal:{ backgroundColor:'#fff', borderRadius:16, padding:SP.xl, width:280, alignItems:'center', ...SH },
-  title:{ fontSize:15, fontWeight:'600', color:C.textPrimary, marginBottom:SP.lg },
-  cancel:{ marginTop:SP.md, paddingVertical:8, paddingHorizontal:20 },
-});
-
-// ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-const SECTIONS = [
-  {id:'work',     label:'Work in progress',          placeholder:'Pour No. / Item No. / Activity...'},
-  {id:'delays',   label:'Delays incurred',           placeholder:'Industrial, weather, access...'},
-  {id:'oral',     label:'Oral instructions',         placeholder:'Instructions received or given...'},
-  {id:'drawings', label:'Drawings & memos received', placeholder:'Document reference...'},
-];
-const CL_ITEMS = ['Inspections and Tests','Visitors and Purposes','Discussions and Meetings','Shortage of Information','Delays, Defects – Client supplies','Planning information required','Equipment on hire','Messages'];
-
-function TodayScreen() {
-  const {state, dispatch} = useDiary();
-  const {entry, settings} = state;
-  const ins = useSafeAreaInsets();
-  const [saving, setSaving] = useState(false);
-  const [fetchingWeather, setFetchingWeather] = useState(false);
-  const [exp, setExp] = useState({work:true,subs:true,delays:false,oral:false,drawings:false});
-  const upd = useCallback(u=>dispatch({type:'UPDATE_ENTRY',payload:u}),[dispatch]);
-  const tog = id => setExp(p=>({...p,[id]:!p[id]}));
-
-  async function handleFetchWeather() {
-    setFetchingWeather(true);
-    try {
-      const w = await fetchWeather();
-      if (w) { upd({weatherAM:w.am, weatherPM:w.pm}); }
-      else { Alert.alert('Weather','Could not get location. Please allow location access or enter weather manually.'); }
-    } catch(e) { Alert.alert('Weather error', e.message); }
-    setFetchingWeather(false);
-  }
-
-  function updLine(sid,i,v){const a=[...(entry.sections[sid]||[''])];a[i]=v;dispatch({type:'UPDATE_SECTION',key:sid,value:a});}
-  function addLine(sid){dispatch({type:'UPDATE_SECTION',key:sid,value:[...(entry.sections[sid]||['']),'']}); }
-  function remLine(sid,i){let a=(entry.sections[sid]||['']).filter((_,x)=>x!==i);if(!a.length)a=[''];dispatch({type:'UPDATE_SECTION',key:sid,value:a});}
-  function addSub(name=''){dispatch({type:'UPDATE_SUBS',payload:[...entry.subs,{name,personnel:'',timeStart:'07:00',timeEnd:'15:30',notes:''}]});}
-  function updSub(i,u){dispatch({type:'UPDATE_SUBS',payload:entry.subs.map((s,x)=>x===i?{...s,...u}:s)});}
-  function remSub(i){dispatch({type:'UPDATE_SUBS',payload:entry.subs.filter((_,x)=>x!==i)});}
-
-  async function addPhoto(sid) {
-    Alert.alert('Add photo','Source',[
-      {text:'Camera',onPress:async()=>{
-        const {status}=await ImagePicker.requestCameraPermissionsAsync();
-        if(status!=='granted'){Alert.alert('Permission needed','Camera access required.');return;}
-        const r=await ImagePicker.launchCameraAsync({quality:0.6,base64:true});
-        if(!r.canceled){const ph=[...(entry.sectionPhotos[sid]||[]),`data:image/jpeg;base64,${r.assets[0].base64}`];dispatch({type:'UPDATE_PHOTOS',sid,photos:ph});}
-      }},
-      {text:'Gallery',onPress:async()=>{
-        const r=await ImagePicker.launchImageLibraryAsync({quality:0.6,base64:true});
-        if(!r.canceled){const ph=[...(entry.sectionPhotos[sid]||[]),`data:image/jpeg;base64,${r.assets[0].base64}`];dispatch({type:'UPDATE_PHOTOS',sid,photos:ph});}
-      }},
-      {text:'Cancel',style:'cancel'},
-    ]);
-  }
 
   async function handleSave() {
     setSaving(true);
@@ -568,6 +219,7 @@ function TodayScreen() {
                 </ScrollView>
               </View>
             </View>}
+            </View>}
           </View>
         ))}
 
@@ -611,13 +263,15 @@ function TodayScreen() {
                 </View>
               </View>;
             })}
+                </View>
+              </View>;
+            })}
             <TouchableOpacity style={s.addBtn} onPress={()=>addSub()}><Text style={s.addBtnT}>＋ Add subcontractor</Text></TouchableOpacity>
           </View>}
         </View>
 
       </ScrollView>
-      <View style={[s.saveBar,{paddingBottom:ins.bottom+8}]}>
-        <TouchableOpacity style={s.saveBtn} onPress={handleSave} disabled={saving}>
+          <TouchableOpacity style={s.saveBtn} onPress={handleSave} disabled={saving}>
           {saving?<ActivityIndicator color="#fff"/>:<Text style={s.saveBtnT}>💾  Save & notify PM / QA</Text>}
         </TouchableOpacity>
       </View>
@@ -630,7 +284,7 @@ function ChecklistScreen() {
   const {state, dispatch} = useDiary();
   const {entry} = state;
   const ins = useSafeAreaInsets();
-  function upd(i,u){const cur=entry.checklist[i]||{checked:false,note:''};dispatch({type:'UPDATE_CHECKLIST',index:i,value:{...cur,...u}});}
+  function upd(i,u){const cur=entry.checklist[i]||{checked:false,note:''};dispatch({type:'UPDATE_CHECKLIST',index:i,value:{...cur,...u}});} 
   const checked = CL_ITEMS.filter((_,i)=>entry.checklist[i]?.checked).length;
   return (
     <View style={{flex:1,backgroundColor:C.background}}>
@@ -744,6 +398,7 @@ function SignoffScreen() {
           {loading?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontSize:14,fontWeight:'600'}}>{allSigned?'✅  Complete sign-off & email PDF':'⏳  All three parties must sign'}</Text>}
         </TouchableOpacity>
       </View>}
+
     </View>
   );
 }
@@ -771,7 +426,7 @@ function HistoryScreen({navigation}) {
     try{
       const pk=prevMonthKey(mk);
       await generateStatsPdf(mk, grouped[mk]||[], grouped[pk]||[], entries, settings);
-    }catch(e){Alert.alert('Report error',e.message);}
+    }catch(e){Alert.alert('Report error',e.message);}    
     setRepLoading(false);
   }
 
@@ -780,29 +435,6 @@ function HistoryScreen({navigation}) {
     <View style={{flex:1,backgroundColor:C.background}}>
       <AppHeader title="History" subtitle={`${entries.length} entries`}/>
       <ScrollView contentContainerStyle={{padding:SP.md,paddingBottom:ins.bottom+20}} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={()=>{setRefreshing(true);load();}} tintColor={C.accent}/>}>
-        {months.length===0&&<View style={{alignItems:'center',paddingVertical:60}}><Text style={{fontSize:48,marginBottom:SP.md}}>📋</Text><Text style={{fontSize:16,fontWeight:'600',color:C.textPrimary}}>No entries yet</Text><Text style={{fontSize:13,color:C.textSecondary,marginTop:6}}>Save your first entry in the Today tab</Text></View>}
-        {months.map(mk=>{
-          const mes=grouped[mk];
-          const totH=mes.reduce((a,e)=>a+(e.totalHours||0),0);
-          const signed=mes.filter(e=>e.signoffStatus==='complete').length;
-          return <View key={mk} style={{marginBottom:SP.lg}}>
-            <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:SP.sm}}>
-              <View><Text style={{fontSize:16,fontWeight:'700',color:C.textPrimary}}>{fmtMonth(mk)}</Text><Text style={{fontSize:12,color:C.textSecondary,marginTop:2}}>{mes.length} entries · {totH.toFixed(1)} hrs · {signed}/{mes.length} signed</Text></View>
-              <TouchableOpacity style={{backgroundColor:C.accentLight,borderWidth:1,borderColor:C.accent,borderRadius:R.full,paddingHorizontal:14,paddingVertical:7,minWidth:44,alignItems:'center'}} onPress={()=>handleReport(mk)} disabled={repLoading}>
-                {repLoading?<ActivityIndicator size="small" color={C.accent}/>:<Text style={{fontSize:13,color:C.accentDark,fontWeight:'600'}}>📊 WHS Report</Text>}
-              </TouchableOpacity>
-            </View>
-            {mes.map(e=>(
-              <TouchableOpacity key={e.id} style={{backgroundColor:C.white,borderRadius:R.lg,borderWidth:0.5,borderColor:e.signoffStatus==='complete'?C.accent:C.border,padding:SP.md,marginBottom:SP.sm,...SH}} onPress={()=>{dispatch({type:'LOAD_ENTRY',payload:e});navigation.navigate('Today');}} activeOpacity={0.7}>
-                <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
-                  <Text style={{fontSize:14,fontWeight:'600',color:C.textPrimary}}>{fmtDateShort(e.date)}</Text>
-                  <Text style={{fontSize:12,fontWeight:'500',color:stColor(e.signoffStatus)}}>{stLabel(e.signoffStatus)}</Text>
-                </View>
-                <Text style={{fontSize:12,color:C.textSecondary,marginBottom:SP.sm}}>{e.projectName||'Unnamed'}{e.projectNo?` · ${e.projectNo}`:''}</Text>
-                <View style={{flexDirection:'row',gap:SP.sm,flexWrap:'wrap'}}>
-                  {[['👷',e.totalPersonnel||0,'pax'],['⏱',`${(e.totalHours||0).toFixed(1)}`,'hrs'],['🌤',e.weatherAM||'—','AM']].map(([ic,v,l])=>(
-                    <View key={l} style={{flexDirection:'row',alignItems:'center',gap:4,backgroundColor:C.background,borderRadius:R.full,paddingHorizontal:10,paddingVertical:4}}>
-                      <Text style={{fontSize:12}}>{ic}</Text><Text style={{fontSize:12,fontWeight:'600',color:C.textPrimary}}>{v}</Text><Text style={{fontSize:11,color:C.textSecondary}}>{l}</Text>
                     </View>
                   ))}
                 </View>
@@ -870,9 +502,7 @@ function SettingsScreen() {
 }
 
 // ─── SHARED COMPONENTS & STYLES ───────────────────────────────────────────────
-function Card({children}){return <View style={s.card}><View style={s.cardBody}>{children}</View></View>;}
-function SL({children}){return <Text style={{fontSize:11,fontWeight:'700',textTransform:'uppercase',letterSpacing:0.6,color:C.textSecondary,marginBottom:SP.sm,marginTop:SP.md}}>{children}</Text>;}
-const s = StyleSheet.create({
+function Card({children}){return <View style={s.card}><View style={s.cardBody}>{children}</View></View>;}function SL({children}){return <Text style={{fontSize:11,fontWeight:'700',textTransform:'uppercase',letterSpacing:0.6,color:C.textSecondary,marginBottom:SP.sm,marginTop:SP.md}}>{children}</Text>;}const s = StyleSheet.create({
   card:{backgroundColor:C.white,borderRadius:R.lg,borderWidth:0.5,borderColor:C.border,marginBottom:SP.sm,...SH},
   cardHdr:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:SP.md},
   cardTitle:{fontSize:14,fontWeight:'600',color:C.textPrimary},
@@ -901,12 +531,14 @@ const s = StyleSheet.create({
   weatherBtn:{flexDirection:'row',alignItems:'center',backgroundColor:C.accentLight,borderRadius:R.full,paddingHorizontal:12,paddingVertical:6,borderWidth:0.5,borderColor:C.accent},
   weatherBtnT:{fontSize:12,color:C.accentDark,fontWeight:'600'},
 });
+});
 
 // ─── NAVIGATION ───────────────────────────────────────────────────────────────
 const Tab = createBottomTabNavigator();
-function TabIcon({name,focused}){
-  const icons={Today:focused?'✏️':'📝',Checklist:focused?'☑️':'📋','Sign off':focused?'✍️':'📄',History:focused?'🗂️':'📁',Settings:focused?'⚙️':'🔧'};
-  return <Text style={{fontSize:20}}>{icons[name]||'•'}</Text>;
+function TabIcon({ name, focused }) {
+  const icons = { Today:focused?'✏️':'📝', Checklist:focused?'☑️':'📋', 'Sign off':focused?'✍️':'📄', History:focused?'🗂️':'📁', Settings:focused?'⚙️':'🔧' };
+  return <Text style={{ fontSize:20 }}>{icons[name]||'•'}</Text>;
+}
 }
 
 export default function App() {
