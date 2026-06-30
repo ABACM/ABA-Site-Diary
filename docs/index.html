@@ -269,10 +269,12 @@ function render() {
     html += `<div class="card"><div class="card-header"><h2>Checklist items</h2></div><div class="card-body">
       ${CL.map((item,i)=>{
         const cl=entry.checklist?.[i]||{};
+        const notes = Array.isArray(cl.notes) ? cl.notes.filter(Boolean) : (cl.note ? [cl.note] : []);
+        const notesHtml = notes.map(n=>`<div class="cl-note">${n}</div>`).join('');
         if(!cl.checked) return '';
         return `<div class="cl-item">
           <div class="cl-check checked">✓</div>
-          <div><div>${i+1}. ${item}</div>${cl.note?`<div class="cl-note">${cl.note}</div>`:''}</div>
+          <div><div>${i+1}. ${item}</div>${notesHtml}</div>
         </div>`;
       }).join('')}
     </div></div>`;
