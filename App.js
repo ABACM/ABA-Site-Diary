@@ -106,7 +106,7 @@ async function getSettings() {
     const r = await AsyncStorage.getItem('aba_settings_v3');
     return r ? JSON.parse(r) : {
       companyName: 'ABA Construction Managers (Aust) Pty Ltd',
-      companyAddress: 'Suite 7 Level One, 55 Heffernan St, Mitchell ACT 2911',
+      companyAddress: '5/28 Essington Street, Mitchell ACT 2911',
       companyPhone: '(02) 6242 3400',
       projectManager:  { name:'', email:'' },
       qaRep:           { name:'', email:'' },
@@ -286,7 +286,14 @@ function buildDiaryHtml(entry, settings={}) {
     const p=parseInt(s.personnel)||0,h=calcSubHours(s);
     return `<tr><td>${s.name||'—'}</td><td style="text-align:center">${p}</td><td style="text-align:center">${s.timeStart||'—'}–${s.timeEnd||'—'}</td><td style="text-align:right;font-weight:600;color:#4CAF50">${(p*h).toFixed(1)} hrs</td></tr>${s.notes?`<tr><td colspan="4" style="font-size:11px;color:#6B7280;padding:2px 8px 6px">${s.notes}</td></tr>`:''}`;
   }).join('');
-  const clRows=CL.map((l,i)=>{const cl=entry.checklist?.[i]||{};return `<tr><td style="width:20px">${cl.checked?'☑':'☐'}</td><td>${l}</td><td style="color:#6B7280;font-size:11px">${cl.note||''}</td></tr>`;}).join('');
+  const clRows=CL.map((l,i)=>{
+    const cl=entry.checklist?.[i]||{};
+    const notes = Array.isArray(cl.notes) ? cl.notes.filter(Boolean) : (cl.note ? [cl.note] : []);
+    const notesHtml = notes.length
+      ? notes.map(n=>`<div style="padding:1px 0">${n}</div>`).join('')
+      : '';
+    return `<tr><td style="width:20px">${cl.checked?'☑':'☐'}</td><td>${l}</td><td style="color:#6B7280;font-size:11px">${notesHtml}</td></tr>`;
+  }).join('');
   const sigBlock=(label,name,sigInfo)=>`<div style="flex:1;min-width:130px"><div style="font-size:10px;color:#6B7280;text-transform:uppercase;margin-bottom:2px">${label}</div><div style="font-size:12px;font-weight:600;margin-bottom:2px">${name||''}</div>${sigInfo?`<div style="font-size:10px;color:#4CAF50">✓ Signed ${sigInfo}</div>`:''}<div style="width:100%;height:40px;border-bottom:2px solid #0D1B3E;margin-top:4px"></div></div>`;
   const badge=entry.signoffStatus==='complete'?`<span style="background:#4CAF50;color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">✅ Signed off</span>`:`<span style="background:#6B7280;color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">Pending</span>`;
   const sigs = entry.signedBy||{};
@@ -337,7 +344,10 @@ function buildStatsHtml(monthKey, monthEntries, prevEntries, allEntries, setting
     };
   }
   const c=stats(monthEntries),p=stats(prevEntries),l=stats(allEntries);
-  const ml=fmtMonth(monthKey),pl=fmtMonth(prevMonthKey(monthKey));
+  const ml=monthKey&&monthEntries.length&&monthEntries===allEntries?'All time':fmtMonth(monthKey);
+  const pl=fmtMonth(prevMonthKey(monthKey));
+  const proj = monthEntries[0]||allEntries[0]||{};
+  const projLabel = `${proj.projectName||'Unknown project'}${proj.projectNo?` (${proj.projectNo})`:''}`;
   const fv=(v)=>v===null?'—':String(v);
   const ROWS=[
     {l:'A',label:'Length of Project (Months)',c:fv(c.pm),p:fv(p.pm),lt:fv(l.pm),auto:true},
@@ -373,6 +383,7 @@ tr:nth-child(even) td{background:#F8FAF8}
 .ftr{margin-top:14px;border-top:1px solid #D0D9D0;padding-top:6px;font-size:9px;color:#9CA3AF;display:flex;justify-content:space-between}
 </style></head><body>
 <div class="hdr"><div><div class="co">${settings.companyName||'ABA Construction Managers (Aust) Pty Ltd'}</div><div class="cos">${settings.companyAddress||''}</div><div class="cos">Tel: ${settings.companyPhone||''} | ACN: 155 990 597 | ABN: 29 155 990 597</div></div><div><div class="ttl">Monthly WHS Statistics</div><div style="font-size:11px;color:#6B7280;text-align:right;margin-top:2px">Ref: aba-220 | ${ml}</div></div></div>
+<div style="background:#0D1B3E;color:#fff;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;font-weight:600">📁 Project: ${projLabel}</div>
 <div class="meta"><div class="mi"><strong>Report period</strong>${ml}</div><div class="mi"><strong>Diary entries</strong>${monthEntries.length} days</div><div class="mi"><strong>Total hours</strong>${c.totalHours} hrs</div><div class="mi"><strong>Personnel days</strong>${c.totalPersonnel}</div><div class="mi"><strong>Generated</strong>${format(new Date(),'d MMM yyyy, HH:mm')}</div></div>
 <h3>WHS & Project Statistics (Stats.xlsx — Rows A to O)</h3>
 <table><thead><tr><th style="width:20px"></th><th>Item</th><th class="r" style="width:100px">Current<br><small style="font-weight:400">${ml}</small></th><th class="r" style="width:100px">Previous<br><small style="font-weight:400">${pl}</small></th><th class="r" style="width:80px">Life to date</th></tr></thead><tbody>
@@ -380,8 +391,8 @@ ${ROWS.map(r=>`<tr><td class="lt">${r.l}.</td><td>${r.label}<span class="${r.aut
 </tbody></table>
 <p style="font-size:9px;color:#9CA3AF;margin-bottom:10px">Auto = calculated from submitted diary data. Manual = update D, E, F, H, J after incidents. LTIFR = LTI × 1,000,000 ÷ Total hours.</p>
 ${Object.keys(subMap).length?`<h3>Subcontractor Labour Hours — ${ml}</h3><table><thead><tr><th>Subcontractor</th><th class="r">Days on site</th><th class="r">Max personnel</th><th class="r">Total hours</th></tr></thead><tbody>${Object.entries(subMap).map(([n,d])=>`<tr><td>${n}</td><td class="nr">${d.days}</td><td class="nr">${d.maxP}</td><td class="nr">${d.hours.toFixed(1)} hrs</td></tr>`).join('')}<tr style="font-weight:700;background:#E8F5E9"><td>TOTAL</td><td class="nr">—</td><td class="nr">—</td><td class="nr">${Object.values(subMap).reduce((a,d)=>a+d.hours,0).toFixed(1)} hrs</td></tr></tbody></table>`:''}
-<h3>Daily entries — ${ml}</h3><table><thead><tr><th>Date</th><th>Project</th><th>Weather AM/PM</th><th class="r">Personnel</th><th class="r">Labour hrs</th><th>Status</th></tr></thead><tbody>
-${monthEntries.map(e=>`<tr><td>${toDisplay(e.date)}</td><td>${e.projectName||'—'} (${e.projectNo||'—'})</td><td>${e.weatherAM||'—'} / ${e.weatherPM||'—'}</td><td class="nr">${e.totalPersonnel||0}</td><td class="nr">${(e.totalHours||0).toFixed(1)}</td><td>${e.signoffStatus==='complete'?'✅ Signed':e.signoffStatus==='pending'?'⏳ Pending':'📝 Draft'}</td></tr>`).join('')}
+<h3>Daily entries — ${ml}</h3><table><thead><tr><th>Date</th><th>Weather AM/PM</th><th class="r">Personnel</th><th class="r">Labour hrs</th><th>Status</th></tr></thead><tbody>
+${monthEntries.map(e=>`<tr><td>${toDisplay(e.date)}</td><td>${e.weatherAM||'—'} / ${e.weatherPM||'—'}</td><td class="nr">${e.totalPersonnel||0}</td><td class="nr">${(e.totalHours||0).toFixed(1)}</td><td>${e.signoffStatus==='complete'?'✅ Signed':e.signoffStatus==='pending'?'⏳ Pending':'📝 Draft'}</td></tr>`).join('')}
 </tbody></table>
 <div class="ftr"><span>ABA Construction Managers | Monthly WHS Statistics | ${ml}</span><span>Generated ${format(new Date(),'d MMM yyyy, HH:mm')}</span></div>
 </body></html>`;
@@ -643,8 +654,8 @@ function TodayScreen(){
 
   async function addPhoto(sid){
     Alert.alert('Add photo','Source',[
-      {text:'Camera',onPress:async()=>{const{status}=await ImagePicker.requestCameraPermissionsAsync();if(status!=='granted'){Alert.alert('Permission needed','Camera access required.');return;}const r=await ImagePicker.launchCameraAsync({quality:0.55,base64:true});if(!r.canceled){const ph=[...(entry.sectionPhotos[sid]||[]),`data:image/jpeg;base64,${r.assets[0].base64}`];dispatch({type:'UPDATE_PHOTOS',sid,photos:ph});}}},
-      {text:'Gallery',onPress:async()=>{const r=await ImagePicker.launchImageLibraryAsync({quality:0.55,base64:true});if(!r.canceled){const ph=[...(entry.sectionPhotos[sid]||[]),`data:image/jpeg;base64,${r.assets[0].base64}`];dispatch({type:'UPDATE_PHOTOS',sid,photos:ph});}}},
+      {text:'Camera',onPress:async()=>{const{status}=await ImagePicker.requestCameraPermissionsAsync();if(status!=='granted'){Alert.alert('Permission needed','Camera access required.');return;}const r=await ImagePicker.launchCameraAsync({quality:0.3,base64:true});if(!r.canceled){const ph=[...(entry.sectionPhotos[sid]||[]),`data:image/jpeg;base64,${r.assets[0].base64}`];dispatch({type:'UPDATE_PHOTOS',sid,photos:ph});}}},
+      {text:'Gallery',onPress:async()=>{const r=await ImagePicker.launchImageLibraryAsync({quality:0.3,base64:true});if(!r.canceled){const ph=[...(entry.sectionPhotos[sid]||[]),`data:image/jpeg;base64,${r.assets[0].base64}`];dispatch({type:'UPDATE_PHOTOS',sid,photos:ph});}}},
       {text:'Cancel',style:'cancel'},
     ]);
   }
@@ -675,16 +686,54 @@ function TodayScreen(){
       let emailStatus='';
       if(recips.length){
         try{
+          // IMPORTANT: strip photos from the link payload — base64 images make the URL
+          // too long to open reliably and exceed EmailJS message size limits.
+          // Photos are still included in the final signed-off PDF.
+          const linkEntry = {
+            id: toSave.id, date: toSave.date, projectName: toSave.projectName, projectNo: toSave.projectNo,
+            weatherAM: toSave.weatherAM, weatherPM: toSave.weatherPM,
+            sections: toSave.sections, subs: toSave.subs, checklist: toSave.checklist,
+            addlNotes: toSave.addlNotes, signoffStatus: toSave.signoffStatus,
+            totalPersonnel: toSave.totalPersonnel, totalHours: toSave.totalHours,
+            // sectionPhotos intentionally omitted
+          };
           const encodeEntry=e=>{try{return btoa(unescape(encodeURIComponent(JSON.stringify(e))));}catch{return '';}};
-          const b64=encodeEntry(toSave);
-          const base=pagesUrl||'https://YOUR-GITHUB-USERNAME.github.io/aba-site-diary';
+          const b64=encodeEntry(linkEntry);
+          const base=(pagesUrl||'https://YOUR-GITHUB-USERNAME.github.io/aba-site-diary').replace(/\/$/,'');
           const pmLink=`${base}/?id=${toSave.id}&role=pm&name=${encodeURIComponent(settings?.projectManager?.name||'PM')}&data=${b64}`;
           const qaLink=`${base}/?id=${toSave.id}&role=qa&name=${encodeURIComponent(settings?.qaRep?.name||'QA')}&data=${b64}`;
           const subject=`[Sign-off required] Site Diary – ${toSave.projectName||'Project'} – ${toDisplay(toSave.date)}`;
-          const body=`A site diary entry requires your review and sign-off.\n\nProject: ${toSave.projectName||'—'} (${toSave.projectNo||'—'})\nDate: ${toDisplay(toSave.date)}\nPersonnel on site: ${tot.totalPersonnel}\nLabour hours: ${tot.totalHours.toFixed(1)} hrs\nWeather AM: ${toSave.weatherAM||'—'} | PM: ${toSave.weatherPM||'—'}\n\n━━━ REVIEW & SIGN ━━━\n\nProject Manager sign-off:\n${pmLink}\n\nQA Representative sign-off:\n${qaLink}\n\nTap your link to open a mobile-friendly page showing the full diary entry. Review it and tap Confirm Signature.\n\nRegards,\n${settings?.siteSupervisor?.name||'Site Supervisor'}\nABA Construction Managers\n${settings?.companyPhone||''}`;
-          const result=await sendNotificationEmail(settings,recips,subject,body);
-          if(result.ok){emailStatus='✅ Sign-off notification emailed to PM & QA.';}
-          else{emailStatus=`⚠️ Email failed: ${result.reason}`;}
+          const body=`A site diary entry requires your review and sign-off.
+
+Project: ${toSave.projectName||'—'} (${toSave.projectNo||'—'})
+Date: ${toDisplay(toSave.date)}
+Personnel on site: ${tot.totalPersonnel}
+Labour hours: ${tot.totalHours.toFixed(1)} hrs
+Weather AM: ${toSave.weatherAM||'—'} | PM: ${toSave.weatherPM||'—'}
+
+============================
+TAP YOUR LINK BELOW TO REVIEW & SIGN
+============================
+
+PROJECT MANAGER — tap here to review and sign:
+${pmLink}
+
+QA REPRESENTATIVE — tap here to review and sign:
+${qaLink}
+
+Each link opens a page in your phone's browser showing the full diary entry. Review it and tap "Confirm signature".
+
+Regards,
+${settings?.siteSupervisor?.name||'Site Supervisor'}
+ABA Construction Managers
+${settings?.companyPhone||''}`;
+          if(!pagesUrl || pagesUrl.includes('YOUR-GITHUB-USERNAME')){
+            emailStatus='⚠️ Sign-off link not set up — go to Settings → "Sign-off web page" and enter your GitHub Pages URL, otherwise PM/QA cannot open the review link.';
+          } else {
+            const result=await sendNotificationEmail(settings,recips,subject,body);
+            if(result.ok){emailStatus='✅ Sign-off notification with review links emailed to PM & QA.';}
+            else{emailStatus=`⚠️ Email failed: ${result.reason}`;}
+          }
         }catch(e){emailStatus=`⚠️ Email error: ${e.message}`;}
       } else {
         emailStatus='⚠️ No PM/QA email addresses set — go to Settings to configure.';
@@ -699,7 +748,16 @@ function TodayScreen(){
 
   return(
     <View style={{flex:1,backgroundColor:C.background}}>
-      <AppHeader title="Site Diary" subtitle="ABA Construction Managers"/>
+      <AppHeader title="Site Diary" subtitle="ABA Construction Managers" rightAction={{label:'＋ New',onPress:()=>{
+        if(entry.projectName||entry.subs.length||entry.sections.work.some(Boolean)){
+          Alert.alert('Start new entry?','This will clear the current form. Make sure you have saved this entry as a draft if you want to keep it.',[
+            {text:'Start new',style:'destructive',onPress:()=>dispatch({type:'NEW_ENTRY'})},
+            {text:'Cancel',style:'cancel'},
+          ]);
+        } else {
+          dispatch({type:'NEW_ENTRY'});
+        }
+      }}}/>
       <ScrollView contentContainerStyle={{padding:SP.md,paddingBottom:ins.bottom+90}}>
 
         {/* Project + Date */}
@@ -855,24 +913,75 @@ function ChecklistScreen(){
   const {state,dispatch}=useDiary();
   const {entry}=state;
   const ins=useSafeAreaInsets();
-  function upd(i,u){const cur=entry.checklist[i]||{checked:false,note:''};dispatch({type:'UPDATE_CHECKLIST',index:i,value:{...cur,...u}});}
-  const checked=CL_ITEMS.filter((_,i)=>entry.checklist[i]?.checked).length;
+
+  // Normalise: support old format {checked,note:string} and new format {checked,notes:[string,...]}
+  function getNotes(i){
+    const cl=entry.checklist[i];
+    if(!cl) return [''];
+    if(Array.isArray(cl.notes)) return cl.notes.length?cl.notes:[''];
+    if(cl.note) return [cl.note]; // migrate legacy single note
+    return [''];
+  }
+  function getChecked(i){ return !!entry.checklist[i]?.checked; }
+
+  function setChecked(i,val){
+    const notes=getNotes(i);
+    dispatch({type:'UPDATE_CHECKLIST',index:i,value:{checked:val,notes}});
+  }
+  function updNote(i,lineIdx,val){
+    const notes=[...getNotes(i)];
+    notes[lineIdx]=val;
+    dispatch({type:'UPDATE_CHECKLIST',index:i,value:{checked:getChecked(i),notes}});
+  }
+  function addNoteLine(i){
+    const notes=[...getNotes(i),''];
+    dispatch({type:'UPDATE_CHECKLIST',index:i,value:{checked:getChecked(i),notes}});
+  }
+  function removeNoteLine(i,lineIdx){
+    let notes=getNotes(i).filter((_,x)=>x!==lineIdx);
+    if(!notes.length) notes=[''];
+    dispatch({type:'UPDATE_CHECKLIST',index:i,value:{checked:getChecked(i),notes}});
+  }
+
+  const checked=CL_ITEMS.filter((_,i)=>getChecked(i)).length;
+
   return(
     <View style={{flex:1,backgroundColor:C.background}}>
       <AppHeader title="Other Checklist" subtitle={`${checked} of ${CL_ITEMS.length} items marked`}/>
       <ScrollView contentContainerStyle={{padding:SP.md,paddingBottom:ins.bottom+20}}>
         <View style={{backgroundColor:C.white,borderRadius:R.lg,borderWidth:0.5,borderColor:C.border,...SH}}>
           {CL_ITEMS.map((item,i)=>{
-            const cl=entry.checklist[i]||{checked:false,note:''};
-            return<View key={i} style={{flexDirection:'row',alignItems:'flex-start',padding:SP.md,borderBottomWidth:i<CL_ITEMS.length-1?0.5:0,borderBottomColor:C.border}}>
-              <TouchableOpacity style={{width:24,height:24,borderRadius:12,borderWidth:1.5,borderColor:cl.checked?C.accent:C.border,backgroundColor:cl.checked?C.accent:'transparent',alignItems:'center',justifyContent:'center',marginTop:2,flexShrink:0}} onPress={()=>upd(i,{checked:!cl.checked})}>
-                {cl.checked&&<Text style={{color:'#fff',fontSize:13,fontWeight:'700'}}>✓</Text>}
-              </TouchableOpacity>
-              <View style={{flex:1,marginLeft:SP.md}}>
-                <Text style={{fontSize:13,color:cl.checked?C.textSecondary:C.textPrimary,textDecorationLine:cl.checked?'line-through':'none'}}>{i+1}. {item}</Text>
-                <View style={{flexDirection:'row',alignItems:'center',marginTop:6}}>
-                  <TextInput style={{flex:1,fontSize:12,color:C.textPrimary,borderWidth:0.5,borderColor:'transparent',borderRadius:R.sm,padding:6,backgroundColor:C.background}} value={cl.note} onChangeText={v=>upd(i,{note:v})} placeholder="Notes..."/>
-                  <VoiceButton onResult={t=>upd(i,{note:(cl.note?cl.note+' ':'')+t})}/>
+            const isChecked=getChecked(i);
+            const notes=getNotes(i);
+            return<View key={i} style={{padding:SP.md,borderBottomWidth:i<CL_ITEMS.length-1?0.5:0,borderBottomColor:C.border}}>
+              <View style={{flexDirection:'row',alignItems:'flex-start'}}>
+                <TouchableOpacity style={{width:24,height:24,borderRadius:12,borderWidth:1.5,borderColor:isChecked?C.accent:C.border,backgroundColor:isChecked?C.accent:'transparent',alignItems:'center',justifyContent:'center',marginTop:2,flexShrink:0}} onPress={()=>setChecked(i,!isChecked)}>
+                  {isChecked&&<Text style={{color:'#fff',fontSize:13,fontWeight:'700'}}>✓</Text>}
+                </TouchableOpacity>
+                <View style={{flex:1,marginLeft:SP.md}}>
+                  <Text style={{fontSize:13,color:isChecked?C.textSecondary:C.textPrimary,textDecorationLine:isChecked?'line-through':'none'}}>{i+1}. {item}</Text>
+
+                  {notes.map((note,lineIdx)=>(
+                    <View key={lineIdx} style={{flexDirection:'row',alignItems:'center',marginTop:6}}>
+                      <TextInput
+                        style={{flex:1,fontSize:12,color:C.textPrimary,borderWidth:0.5,borderColor:C.border,borderRadius:R.sm,padding:7,backgroundColor:C.background}}
+                        value={note}
+                        onChangeText={v=>updNote(i,lineIdx,v)}
+                        placeholder="Notes / activity..."
+                        multiline
+                      />
+                      <VoiceButton onResult={t=>updNote(i,lineIdx,(note?note+' ':'')+t)}/>
+                      {notes.length>1&&(
+                        <TouchableOpacity onPress={()=>removeNoteLine(i,lineIdx)} style={{width:26,alignItems:'center',justifyContent:'center',marginLeft:2}}>
+                          <Text style={{color:C.textSecondary,fontSize:15}}>🗑</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+
+                  <TouchableOpacity style={{marginTop:8,borderWidth:0.5,borderStyle:'dashed',borderColor:C.border,borderRadius:R.sm,paddingVertical:6,alignItems:'center'}} onPress={()=>addNoteLine(i)}>
+                    <Text style={{fontSize:11,color:C.textSecondary}}>＋ Add line</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             </View>;
@@ -912,19 +1021,36 @@ function SignoffScreen(){
       const dateStr=toDisplay(updated.date);
       const emailBody=`All parties have signed off on the site diary.\n\nProject: ${updated.projectName||'—'} (${updated.projectNo||'—'})\nDate: ${dateStr}\nPersonnel: ${updated.totalPersonnel} | Labour hours: ${(updated.totalHours||0).toFixed(1)} hrs\n\nSigned by:\n• Site Supervisor: ${signedBy.supervisor?.name||'—'}\n• Project Manager: ${signedBy.pm?.name||'—'}\n• QA Representative: ${signedBy.qa?.name||'—'}\n\nThe completed diary PDF is attached.\nFile: ${fname}\n\nRegards,\n${settings?.siteSupervisor?.name||'Site Supervisor'}\nABA Construction Managers`;
       const subject=`Site Diary Signed Off – ${updated.projectName||'Project'} – ${dateStr}`;
-      // Read PDF as base64
-      const pdfB64=await fileToBase64(pdfUri);
-      const result=await sendSignoffEmail(settings,recipients,subject,emailBody,pdfB64,fname);
-      if(result.ok){
-        Alert.alert('✅ Complete!',`PDF sent to all parties.\nFile: ${fname}`,[
-          {text:'Also share PDF',onPress:async()=>{await Sharing.shareAsync(pdfUri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});}},
-          {text:'Done',style:'cancel'},
-        ]);
+
+      // Check PDF size before attempting email — EmailJS free tier caps around 50KB total payload.
+      // If the PDF (often inflated by photos) is too large, skip the email attempt and share instead.
+      const fileInfo = await FileSystem.getInfoAsync(pdfUri);
+      const pdfSizeKB = fileInfo.exists ? Math.round(fileInfo.size/1024) : 0;
+      const MAX_EMAIL_KB = 45; // safety margin under EmailJS ~50KB limit once base64-encoded overhead is added
+
+      if (pdfSizeKB > MAX_EMAIL_KB) {
+        Alert.alert(
+          '✅ Signed off — PDF too large to email',
+          `File: ${fname} (${pdfSizeKB} KB)\n\nThis PDF is too large to send automatically (likely due to attached photos). Please share it manually via email, WhatsApp, etc.`,
+          [
+            {text:'Share PDF now',onPress:async()=>{await Sharing.shareAsync(pdfUri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});}},
+            {text:'Later',style:'cancel'},
+          ]
+        );
       } else {
-        Alert.alert('✅ Signed off',`${result.reason||'Email not configured'}\n\nFile: ${fname}\n\nSharing PDF so you can send manually.`,[
-          {text:'Share PDF',onPress:async()=>{await Sharing.shareAsync(pdfUri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});}},
-          {text:'Done',style:'cancel'},
-        ]);
+        const pdfB64=await fileToBase64(pdfUri);
+        const result=await sendSignoffEmail(settings,recipients,subject,emailBody,pdfB64,fname);
+        if(result.ok){
+          Alert.alert('✅ Complete!',`PDF (${pdfSizeKB} KB) sent to all parties.\nFile: ${fname}`,[
+            {text:'Also share PDF',onPress:async()=>{await Sharing.shareAsync(pdfUri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});}},
+            {text:'Done',style:'cancel'},
+          ]);
+        } else {
+          Alert.alert('✅ Signed off',`${result.reason||'Email not configured'}\n\nFile: ${fname}\n\nSharing PDF so you can send manually.`,[
+            {text:'Share PDF',onPress:async()=>{await Sharing.shareAsync(pdfUri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});}},
+            {text:'Done',style:'cancel'},
+          ]);
+        }
       }
     }catch(e){Alert.alert('Error',e.message);}
     setLoading(false);
@@ -988,63 +1114,117 @@ function HistoryScreen({navigation}){
   const [loading,setLoading]=useState(true);
   const [refreshing,setRefreshing]=useState(false);
   const [repLoading,setRepLoading]=useState(false);
+
   async function load(){try{const all=await getEntries();setEntries(all);}catch{}setLoading(false);setRefreshing(false);}
   useEffect(()=>{load();},[]);
-  const grouped=entries.reduce((acc,e)=>{const k=(e.date||'unknown').slice(0,7);if(!acc[k])acc[k]=[];acc[k].push(e);return acc;},{});
-  const months=Object.keys(grouped).sort().reverse();
+
+  // Group by project first (key = projectNo|projectName), then by month within each project
+  const projectGroups = entries.reduce((acc,e)=>{
+    const projKey = `${e.projectNo||'—'}|${e.projectName||'Unnamed project'}`;
+    if(!acc[projKey]) acc[projKey] = { projectNo:e.projectNo, projectName:e.projectName, entries:[] };
+    acc[projKey].entries.push(e);
+    return acc;
+  },{});
+  const projectKeys = Object.keys(projectGroups).sort((a,b)=>projectGroups[b].entries.length-projectGroups[a].entries.length);
+
+  function monthsForProject(projEntries){
+    const grouped=projEntries.reduce((acc,e)=>{const k=(e.date||'unknown').slice(0,7);if(!acc[k])acc[k]=[];acc[k].push(e);return acc;},{});
+    return Object.keys(grouped).sort().reverse().map(mk=>({monthKey:mk,entries:grouped[mk]}));
+  }
+
   function stColor(st){return st==='complete'?C.accent:st==='pending'?C.pending:C.primary;}
   function stLabel(st){return st==='complete'?'✅ Signed off':st==='pending'?'⏳ Awaiting sign-off':'📝 Draft';}
-  async function handleReport(mk){
+
+  // Generate WHS report scoped to ONE project (optionally also filtered to one month)
+  async function handleProjectReport(projKey, monthKey=null){
     setRepLoading(true);
     try{
-      const pk=prevMonthKey(mk);
-      const html=buildStatsHtml(mk,grouped[mk]||[],grouped[pk]||[],entries,settings);
+      const proj = projectGroups[projKey];
+      const allProjectEntries = proj.entries;
+      let reportEntries, prevEntries, reportLabel;
+      if (monthKey) {
+        const pk = prevMonthKey(monthKey);
+        reportEntries = allProjectEntries.filter(e=>(e.date||'').startsWith(monthKey));
+        prevEntries   = allProjectEntries.filter(e=>(e.date||'').startsWith(pk));
+        reportLabel = fmtMonth(monthKey);
+      } else {
+        reportEntries = allProjectEntries;
+        prevEntries = [];
+        reportLabel = 'All time';
+      }
+      const html = buildStatsHtml(
+        monthKey || format(new Date(),'yyyy-MM'),
+        reportEntries,
+        prevEntries,
+        allProjectEntries,
+        settings
+      );
       const{uri}=await Print.printToFileAsync({html,base64:false});
-      await Sharing.shareAsync(uri,{mimeType:'application/pdf',dialogTitle:`WHS Statistics – ${fmtMonth(mk)}`});
+      await Sharing.shareAsync(uri,{mimeType:'application/pdf',dialogTitle:`WHS Statistics – ${proj.projectName} – ${reportLabel}`});
     }catch(e){Alert.alert('Report error',e.message);}
     setRepLoading(false);
   }
+
   async function sharePdf(entry){
     try{
       const{uri,fname}=await generateNamedPdf(entry,settings);
       await Sharing.shareAsync(uri,{mimeType:'application/pdf',dialogTitle:fname,UTI:'com.adobe.pdf'});
     }catch(e){Alert.alert('Error generating PDF',e.message);}
   }
+
   if(loading)return<View style={{flex:1,backgroundColor:C.background}}><AppHeader title="History"/><View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.accent} size="large"/></View></View>;
+
   return(
     <View style={{flex:1,backgroundColor:C.background}}>
-      <AppHeader title="History" subtitle={`${entries.length} entries`}/>
+      <AppHeader title="History" subtitle={`${entries.length} entries · ${projectKeys.length} project${projectKeys.length===1?'':'s'}`}/>
       <ScrollView contentContainerStyle={{padding:SP.md,paddingBottom:ins.bottom+20}} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={()=>{setRefreshing(true);load();}} tintColor={C.accent}/>}>
-        {months.length===0&&<View style={{alignItems:'center',paddingVertical:60}}><Text style={{fontSize:48,marginBottom:SP.md}}>📋</Text><Text style={{fontSize:16,fontWeight:'600',color:C.textPrimary}}>No entries yet</Text></View>}
-        {months.map(mk=>{
-          const mes=grouped[mk];
-          const totH=mes.reduce((a,e)=>a+(e.totalHours||0),0);
-          const signed=mes.filter(e=>e.signoffStatus==='complete').length;
-          return<View key={mk} style={{marginBottom:SP.lg}}>
-            <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:SP.sm}}>
-              <View><Text style={{fontSize:16,fontWeight:'700',color:C.textPrimary}}>{fmtMonth(mk)}</Text><Text style={{fontSize:12,color:C.textSecondary,marginTop:2}}>{mes.length} entries · {totH.toFixed(1)} hrs · {signed}/{mes.length} signed</Text></View>
-              <TouchableOpacity style={{backgroundColor:C.accentLight,borderWidth:1,borderColor:C.accent,borderRadius:R.full,paddingHorizontal:14,paddingVertical:7,minWidth:44,alignItems:'center'}} onPress={()=>handleReport(mk)} disabled={repLoading}>
-                {repLoading?<ActivityIndicator size="small" color={C.accent}/>:<Text style={{fontSize:12,color:C.accentDark,fontWeight:'600'}}>📊 WHS Report</Text>}
+        {projectKeys.length===0&&<View style={{alignItems:'center',paddingVertical:60}}><Text style={{fontSize:48,marginBottom:SP.md}}>📋</Text><Text style={{fontSize:16,fontWeight:'600',color:C.textPrimary}}>No entries yet</Text></View>}
+
+        {projectKeys.map(projKey=>{
+          const proj = projectGroups[projKey];
+          const projEntries = proj.entries;
+          const totH = projEntries.reduce((a,e)=>a+(e.totalHours||0),0);
+          const signed = projEntries.filter(e=>e.signoffStatus==='complete').length;
+          const months = monthsForProject(projEntries);
+
+          return<View key={projKey} style={s.projectGroup}>
+            <View style={s.projectHeader}>
+              <View style={{flex:1}}>
+                <Text style={s.projectTitle}>{proj.projectName||'Unnamed project'}</Text>
+                <Text style={s.projectSub}>{proj.projectNo?`No. ${proj.projectNo} · `:''}{projEntries.length} entries · {totH.toFixed(1)} hrs · {signed}/{projEntries.length} signed</Text>
+              </View>
+              <TouchableOpacity style={s.reportBtn} onPress={()=>handleProjectReport(projKey,null)} disabled={repLoading}>
+                {repLoading?<ActivityIndicator size="small" color={C.accent}/>:<Text style={s.reportBtnT}>📊 Project WHS Report</Text>}
               </TouchableOpacity>
             </View>
-            {mes.map(e=>(
-              <TouchableOpacity key={e.id} style={{backgroundColor:C.white,borderRadius:R.lg,borderWidth:0.5,borderColor:e.signoffStatus==='complete'?C.accent:C.border,padding:SP.md,marginBottom:SP.sm,...SH}} onPress={()=>{dispatch({type:'LOAD_ENTRY',payload:e});navigation.navigate('Today');}} activeOpacity={0.7}>
-                <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
-                  <Text style={{fontSize:14,fontWeight:'600',color:C.textPrimary}}>{toDisplay(e.date)}</Text>
-                  <Text style={{fontSize:12,fontWeight:'500',color:stColor(e.signoffStatus)}}>{stLabel(e.signoffStatus)}</Text>
+
+            {months.map(({monthKey,entries:mEntries})=>(
+              <View key={monthKey} style={{marginBottom:SP.md}}>
+                <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:6,paddingHorizontal:4}}>
+                  <Text style={s.monthLabel}>{fmtMonth(monthKey)}</Text>
+                  <TouchableOpacity onPress={()=>handleProjectReport(projKey,monthKey)} disabled={repLoading}>
+                    <Text style={s.monthReportLink}>📊 Month report</Text>
+                  </TouchableOpacity>
                 </View>
-                <Text style={{fontSize:12,color:C.textSecondary,marginBottom:SP.sm}}>{e.projectName||'Unnamed'}{e.projectNo?` · ${e.projectNo}`:''}</Text>
-                <View style={{flexDirection:'row',gap:SP.sm,flexWrap:'wrap',marginBottom:SP.sm}}>
-                  {[['👷',e.totalPersonnel||0,'pax'],['⏱',`${(e.totalHours||0).toFixed(1)}`,'hrs'],['🌤',e.weatherAM||'—','AM']].map(([ic,v,l])=>(
-                    <View key={l} style={{flexDirection:'row',alignItems:'center',gap:4,backgroundColor:C.background,borderRadius:R.full,paddingHorizontal:10,paddingVertical:4}}>
-                      <Text style={{fontSize:12}}>{ic}</Text><Text style={{fontSize:12,fontWeight:'600',color:C.textPrimary}}>{v}</Text><Text style={{fontSize:11,color:C.textSecondary}}>{l}</Text>
+                {mEntries.map(e=>(
+                  <TouchableOpacity key={e.id} style={{backgroundColor:C.white,borderRadius:R.lg,borderWidth:0.5,borderColor:e.signoffStatus==='complete'?C.accent:C.border,padding:SP.md,marginBottom:SP.sm,...SH}} onPress={()=>{dispatch({type:'LOAD_ENTRY',payload:e});navigation.navigate('Today');}} activeOpacity={0.7}>
+                    <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                      <Text style={{fontSize:14,fontWeight:'600',color:C.textPrimary}}>{toDisplay(e.date)}</Text>
+                      <Text style={{fontSize:12,fontWeight:'500',color:stColor(e.signoffStatus)}}>{stLabel(e.signoffStatus)}</Text>
                     </View>
-                  ))}
-                </View>
-                <TouchableOpacity style={{borderWidth:0.5,borderColor:C.accent,borderRadius:R.sm,paddingHorizontal:10,paddingVertical:5,alignSelf:'flex-start',backgroundColor:C.accentLight}} onPress={()=>sharePdf(e)}>
-                  <Text style={{fontSize:12,color:C.accentDark,fontWeight:'500'}}>📄 Share PDF</Text>
-                </TouchableOpacity>
-              </TouchableOpacity>
+                    <View style={{flexDirection:'row',gap:SP.sm,flexWrap:'wrap',marginBottom:SP.sm}}>
+                      {[['👷',e.totalPersonnel||0,'pax'],['⏱',`${(e.totalHours||0).toFixed(1)}`,'hrs'],['🌤',e.weatherAM||'—','AM']].map(([ic,v,l])=>(
+                        <View key={l} style={{flexDirection:'row',alignItems:'center',gap:4,backgroundColor:C.background,borderRadius:R.full,paddingHorizontal:10,paddingVertical:4}}>
+                          <Text style={{fontSize:12}}>{ic}</Text><Text style={{fontSize:12,fontWeight:'600',color:C.textPrimary}}>{v}</Text><Text style={{fontSize:11,color:C.textSecondary}}>{l}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <TouchableOpacity style={{borderWidth:0.5,borderColor:C.accent,borderRadius:R.sm,paddingHorizontal:10,paddingVertical:5,alignSelf:'flex-start',backgroundColor:C.accentLight}} onPress={()=>sharePdf(e)}>
+                      <Text style={{fontSize:12,color:C.accentDark,fontWeight:'500'}}>📄 Share PDF</Text>
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                ))}
+              </View>
             ))}
           </View>;
         })}
@@ -1070,7 +1250,7 @@ function SettingsScreen(){
       <AppHeader title="Settings" subtitle="Personnel & preferences"/>
       <ScrollView contentContainerStyle={{padding:SP.md,paddingBottom:ins.bottom+100}}>
         <SL>Company details</SL>
-        <Card>{[['Company name','companyName','ABA Construction Managers'],['Address','companyAddress','55 Heffernan St, Mitchell ACT 2911'],['Phone','companyPhone','(02) 6242 3400']].map(([l,k,ph])=><View key={k} style={{marginBottom:SP.sm}}><Text style={s.fl}>{l}</Text><TextInput style={s.inp} value={loc[k]||''} onChangeText={v=>updL(k,v)} placeholder={ph}/></View>)}</Card>
+        <Card>{[['Company name','companyName','ABA Construction Managers'],['Address','companyAddress','5/28 Essington Street, Mitchell ACT 2911'],['Phone','companyPhone','(02) 6242 3400']].map(([l,k,ph])=><View key={k} style={{marginBottom:SP.sm}}><Text style={s.fl}>{l}</Text><TextInput style={s.inp} value={loc[k]||''} onChangeText={v=>updL(k,v)} placeholder={ph}/></View>)}</Card>
         <SL>Sign-off personnel</SL>
         {PEOPLE.map(p=><Card key={p.key}>
           <View style={{flexDirection:'row',alignItems:'center',gap:SP.sm,marginBottom:SP.md}}><Text style={{fontSize:22}}>{p.icon}</Text><Text style={{fontSize:15,fontWeight:'600',color:C.textPrimary}}>{p.label}</Text></View>
@@ -1148,6 +1328,14 @@ const s=StyleSheet.create({
   pillN:{fontSize:12,color:C.accentDark},
   weatherBtn:{flexDirection:'row',alignItems:'center',backgroundColor:C.accentLight,borderRadius:R.full,paddingHorizontal:12,paddingVertical:6,borderWidth:0.5,borderColor:C.accent},
   weatherBtnT:{fontSize:12,color:C.accentDark,fontWeight:'600'},
+  projectGroup:{marginBottom:SP.xl,backgroundColor:'rgba(255,255,255,0.5)',borderRadius:R.lg,padding:SP.sm},
+  projectHeader:{flexDirection:'row',alignItems:'flex-start',justifyContent:'space-between',marginBottom:SP.md,paddingHorizontal:4,paddingTop:4},
+  projectTitle:{fontSize:17,fontWeight:'700',color:C.primary},
+  projectSub:{fontSize:12,color:C.textSecondary,marginTop:3},
+  reportBtn:{backgroundColor:C.primary,borderRadius:R.full,paddingHorizontal:14,paddingVertical:8,minWidth:44,alignItems:'center'},
+  reportBtnT:{fontSize:12,color:'#fff',fontWeight:'600'},
+  monthLabel:{fontSize:13,fontWeight:'700',color:C.textSecondary,textTransform:'uppercase',letterSpacing:0.4},
+  monthReportLink:{fontSize:12,color:C.accentDark,fontWeight:'600'},
 });
 
 // ─── NAVIGATION ───────────────────────────────────────────────────────────────
