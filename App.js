@@ -109,7 +109,7 @@ async function getSettings() {
       companyAddress: '5/28 Essington Street, Mitchell ACT 2911',
       companyPhone: '(02) 6242 3400',
       projectManager:  { name:'', email:'' },
-      qaRep:           { name:'', email:'' },
+      qaRep:           { name:'Mohammed Wazir', email:'mohammed@abacm.net.au' },
       siteSupervisor:  { name:'', email:'' },
       savedSubcontractors: ['Clarke Civil','Mitchell Electrical','ACT Plumbing','Apex Formwork','Total Concreting'],
       standardHoursPerDay: '8',
@@ -189,7 +189,7 @@ async function fetchWeather() {
 
 // ─── EMAIL via EmailJS (no device email client needed) ───────────────────────
 // Send notification email (no PDF attachment) — for sign-off request
-async function sendNotificationEmail(settings, toEmails, subject, body) {
+async function sendNotificationEmail(settings, toEmails, subject, body, links) {
   const { emailjsServiceId, emailjsTemplateId, emailjsPublicKey } = settings || {};
   if (!emailjsServiceId || !emailjsTemplateId || !emailjsPublicKey) {
     return { ok:false, reason:'EmailJS not configured. Go to Settings → Auto email to add your EmailJS credentials.' };
@@ -203,16 +203,28 @@ async function sendNotificationEmail(settings, toEmails, subject, body) {
       template_id: emailjsTemplateId,
       user_id: emailjsPublicKey,
       template_params: {
+        to_email: toEmails[0] || '',
         to_emails: toEmails.join(','),
+        cc_emails: toEmails.slice(1).join(','),
+        reply_to: settings?.siteSupervisor?.email || toEmails[0] || '',
         subject,
         message: body,
-        from_name: settings?.siteSupervisor?.name || 'ABA Site Diary',
+        from_name: settings?.siteSupervisor?.name || 'Site Supervisor',
         company: settings?.companyName || 'ABA Construction Managers',
         has_attachment: 'false',
         pdf_name: '',
+        // Dedicated link fields — use these in the EmailJS template as clickable
+        // HTML buttons/links e.g. <a href="{{pm_link}}">Sign as PM</a>
+        // Plain-text links inside {{message}} sometimes get mangled by email
+        // clients (wrapped, truncated, or misread as mailto:), so a real
+        // <a href> tag in the template is far more reliable.
+        pm_link: links?.pmLink || '',
+        qa_link: links?.qaLink || '',
       },
     };
     console.log('[EmailJS] Sending notification to:', toEmails.join(','));
+    console.log('[EmailJS] pm_link:', links?.pmLink);
+    console.log('[EmailJS] qa_link:', links?.qaLink);
     const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
@@ -243,7 +255,10 @@ async function sendSignoffEmail(settings, toEmails, subject, body, pdfBase64, fi
       template_id: emailjsTemplateId,
       user_id: emailjsPublicKey,
       template_params: {
+        to_email: toEmails[0] || '',
         to_emails: toEmails.join(','),
+        cc_emails: toEmails.slice(1).join(','),
+        reply_to: settings?.siteSupervisor?.email || toEmails[0] || '',
         subject,
         message: body,
         from_name: settings?.siteSupervisor?.name || 'ABA Site Diary',
@@ -730,7 +745,7 @@ ${settings?.companyPhone||''}`;
           if(!pagesUrl || pagesUrl.includes('YOUR-GITHUB-USERNAME')){
             emailStatus='⚠️ Sign-off link not set up — go to Settings → "Sign-off web page" and enter your GitHub Pages URL, otherwise PM/QA cannot open the review link.';
           } else {
-            const result=await sendNotificationEmail(settings,recips,subject,body);
+            const result=await sendNotificationEmail(settings,recips,subject,body,{pmLink,qaLink});
             if(result.ok){emailStatus='✅ Sign-off notification with review links emailed to PM & QA.';}
             else{emailStatus=`⚠️ Email failed: ${result.reason}`;}
           }
@@ -1259,14 +1274,34 @@ function SettingsScreen(){
         </Card>)}
         <SL>Auto email (EmailJS)</SL>
         <View style={{backgroundColor:C.blueLight,borderRadius:R.md,padding:SP.md,marginBottom:SP.sm}}>
-          <Text style={{fontSize:13,color:C.blue,lineHeight:20}}>📧 EmailJS sends PDF emails directly from the app without needing a device email client. Free plan: 200 emails/month. Setup: emailjs.com → create account → Email Services → add Gmail → Email Templates → use template below → copy IDs here.</Text>
+          <Text style={{fontSize:13,color:C.blue,lineHeight:20}}>📧 EmailJS sends PDF emails directly from the app without needing a device email client. Free plan: 200 emails/month. Setup: emailjs.com → create account → Email Services → add Gmail → Email Templates → use variables below → copy IDs here.</Text>
         </View>
         <Card>
           {[['Service ID','emailjsServiceId','e.g. service_abc123'],['Template ID','emailjsTemplateId','e.g. template_xyz789'],['Public key','emailjsPublicKey','e.g. abcDEF123456']].map(([l,k,ph])=><View key={k} style={{marginBottom:SP.sm}}><Text style={s.fl}>{l}</Text><TextInput style={s.inp} value={loc[k]||''} onChangeText={v=>updL(k,v)} placeholder={ph} autoCapitalize="none" autoCorrect={false}/></View>)}
-          <View style={{backgroundColor:C.background,borderRadius:R.md,padding:SP.sm}}>
-            <Text style={{fontSize:11,color:C.textSecondary,fontWeight:'600',marginBottom:4}}>EmailJS template variables to use:</Text>
-            <Text style={{fontSize:11,color:C.textSecondary,fontFamily:Platform.OS==='ios'?'Menlo':'monospace'}}>{'{{to_emails}}\n{{subject}}\n{{message}}\n{{from_name}}\n{{company}}'}</Text>
+          <View style={{backgroundColor:C.background,borderRadius:R.md,padding:SP.sm,marginBottom:SP.sm}}>
+            <Text style={{fontSize:11,color:C.textSecondary,fontWeight:'600',marginBottom:4}}>Template variables to use:</Text>
+            <Text style={{fontSize:11,color:C.textSecondary,fontFamily:Platform.OS==='ios'?'Menlo':'monospace'}}>
+              {'{{to_email}}        — recipient\n{{subject}}         — email subject\n{{message}}         — full email body\n{{from_name}}       — site supervisor name\n{{company}}         — company name\n{{pm_link}}         — PM sign-off URL\n{{qa_link}}         — QA sign-off URL'}
+            </Text>
           </View>
+          <View style={{backgroundColor:'#FEF3D8',borderRadius:R.md,padding:SP.sm,marginBottom:SP.sm}}>
+            <Text style={{fontSize:11,color:'#A06010',lineHeight:17,fontWeight:'600',marginBottom:4}}>⚠️ Template must be updated on emailjs.com:</Text>
+            <Text style={{fontSize:11,color:'#A06010',lineHeight:17}}>
+              {'1. "To Email" field → set to {{to_email}}\n2. Content box → add {{message}} (delete placeholder text)\n3. Add clickable buttons for the sign-off links:\n   <a href="{{pm_link}}">Sign as Project Manager</a>\n   <a href="{{qa_link}}">Sign as QA Representative</a>\n4. For "Regards" name → add {{from_name}} to your template signature (not hardcoded)\n5. Save & re-publish the template'}
+            </Text>
+          </View>
+          <TouchableOpacity style={s.testBtn} onPress={async()=>{
+            if(!loc.projectManager?.email&&!loc.qaRep?.email&&!loc.siteSupervisor?.email){
+              Alert.alert('No email set','Add at least one email address above (PM, QA, or Supervisor) to send a test.');
+              return;
+            }
+            const testRecips=[loc.projectManager?.email,loc.qaRep?.email,loc.siteSupervisor?.email].filter(Boolean);
+            const r=await sendNotificationEmail(loc,testRecips,'ABA Site Diary — Test Email','This is a test email from the ABA Site Diary app.\n\nIf you can read this message, your EmailJS setup is working correctly.\n\nThe sign-off buttons should appear below if your template includes {{pm_link}} and {{qa_link}} as clickable links.\n\nSent at: '+new Date().toLocaleString('en-AU'),{pmLink:'https://example.com/?test=pm_signoff',qaLink:'https://example.com/?test=qa_signoff'});
+            if(r.ok) Alert.alert('✅ Test sent',`Sent to: ${testRecips.join(', ')}\n\nCheck your inbox (and spam folder). If the email arrives blank, check the template setup tip above.`);
+            else Alert.alert('❌ Test failed', r.reason||'Unknown error');
+          }}>
+            <Text style={s.testBtnT}>📤 Send test email</Text>
+          </TouchableOpacity>
         </Card>
         <SL>Sign-off web page (browser review)</SL>
         <Card>
@@ -1328,6 +1363,8 @@ const s=StyleSheet.create({
   pillN:{fontSize:12,color:C.accentDark},
   weatherBtn:{flexDirection:'row',alignItems:'center',backgroundColor:C.accentLight,borderRadius:R.full,paddingHorizontal:12,paddingVertical:6,borderWidth:0.5,borderColor:C.accent},
   weatherBtnT:{fontSize:12,color:C.accentDark,fontWeight:'600'},
+  testBtn:{backgroundColor:C.primary,borderRadius:R.md,padding:SP.sm,alignItems:'center'},
+  testBtnT:{color:'#fff',fontSize:13,fontWeight:'600'},
   projectGroup:{marginBottom:SP.xl,backgroundColor:'rgba(255,255,255,0.5)',borderRadius:R.lg,padding:SP.sm},
   projectHeader:{flexDirection:'row',alignItems:'flex-start',justifyContent:'space-between',marginBottom:SP.md,paddingHorizontal:4,paddingTop:4},
   projectTitle:{fontSize:17,fontWeight:'700',color:C.primary},
