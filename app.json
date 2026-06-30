@@ -2,7 +2,7 @@
   "expo": {
     "name": "ABA Site Diary",
     "slug": "abacm-site-diary",
-    "version": "2.1.0",
+    "version": "2.2.1",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./icon.png",
@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#0D1B3E"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.aba.sitediary"
@@ -26,16 +28,22 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
-      "versionCode": 3
+      "versionCode": 5
     },
     "plugins": [
-      ["expo-location", {
-        "locationAlwaysAndWhenInUsePermission": "Allow ABA Site Diary to use your location to fetch local weather."
-      }],
-      ["expo-image-picker", {
-        "photosPermission": "Allow ABA Site Diary to attach site photos.",
-        "cameraPermission": "Allow ABA Site Diary to take site photos."
-      }]
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow ABA Site Diary to use your location to fetch local weather."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow ABA Site Diary to attach site photos.",
+          "cameraPermission": "Allow ABA Site Diary to take site photos."
+        }
+      ]
     ],
     "extra": {
       "eas": {
